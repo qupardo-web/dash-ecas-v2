@@ -289,21 +289,32 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n=None):
 
         cohorte = int(cohorte)
 
-        anio_fuga_detectado = None
-        # Iterar desde el año siguiente a la cohorte hasta el último año disponible
-        for anio_actual in range(cohorte + 1, max_anio_registro + 1):
+        matriculas_mrun = df_ecas_cohortes[df_ecas_cohortes['mrun'] == mrun]
+    
+        if matriculas_mrun.empty:
+            continue 
             
-            # Verificar si el estudiante no se matriculó en ECAS en el año actual
-            if (mrun, anio_actual) not in matrículas_ecas:
-                print(mrun, anio_actual, "FUGA DETECTADA")
-                anio_fuga_detectado = anio_actual
-                break 
-            
-        if anio_fuga_detectado is not None:
-            fugas_detectadas_supuestas.append({
+        max_anio_en_ecas = int(matriculas_mrun['cat_periodo'].max())
+        
+        if max_anio_en_ecas == max_anio_registro:
+            continue
+        
+        anio_primer_fuga = max_anio_en_ecas + 1
+        
+        retorno_detectado = False
+        for anio_posterior in range(anio_primer_fuga + 1, max_anio_registro + 1):
+            if (mrun, anio_posterior) in matrículas_ecas:
+                retorno_detectado = True
+                break       
+        if retorno_detectado:
+            continue
+
+        print(mrun, anio_primer_fuga, "FUGA DETECTADA (Definitiva)")
+        
+        fugas_detectadas_supuestas.append({
             'mrun': mrun, 
             'cohorte': cohorte, 
-            'anio_fuga': anio_fuga_detectado
+            'anio_fuga': anio_primer_fuga
         })
     
     df_fugas_supuestas = pd.DataFrame(fugas_detectadas_supuestas)
