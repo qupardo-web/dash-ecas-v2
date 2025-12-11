@@ -45,7 +45,7 @@ def create_unified_view():
         select_statements.append(f"""
         SELECT 
             CAST(cat_periodo AS INT) AS cat_periodo, 
-            mrun, 
+            CAST(mrun AS BIGINT) AS mrun, 
             nomb_inst,
             area_conocimiento,
             codigo_unico,
