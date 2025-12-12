@@ -2,9 +2,10 @@ import pandas as pd
 from conn_db import get_db_engine
 import numpy as np
 from collections import defaultdict
-from collections import defaultdict
+from typing import List, Optional, Tuple
 
-COD_INST_ECAS = 104
+COD_ECAS = 104
+CARRERA_LIKE = '%AUDITOR%'
 DURACION_DIURNA_SEMESTRES = 8  # 4 años
 DURACION_VESPERTINA_SEMESTRES = 9 # 4.5 años
 
@@ -17,17 +18,19 @@ def get_mruns_per_year(db_conn, anio_n = None):
     filter_anio = ""
 
     if isinstance(anio_n, int): 
-        filter_anio = f"AND T1.cat_periodo = {anio_n}"
+        filter_anio = f"AND anio_ing_carr_ori = {anio_n}"
 
     sql_query= f"""
     SELECT anio_ing_carr_ori AS ingreso_primero,
 	COUNT(DISTINCT mrun) AS Total_Mruns
     FROM  vista_matriculas_unificada v
     WHERE cod_inst LIKE 104 
-    AND anio_ing_carr_ori NOT IN (9999, 1900)
-    {filter_anio}
+    AND anio_ing_carr_ori BETWEEN 2007 AND 2025
+    AND jornada IN ('Diurna', 'Vespertina')
+    AND dur_total_carr BETWEEN 8 AND 10
+	AND cat_periodo = anio_ing_carr_ori
     GROUP BY anio_ing_carr_ori
-    ORDER BY ingreso_primero DESC
+    ORDER BY ingreso_primero ASC
     """
 
     df_total_mruns = pd.read_sql(sql_query, db_conn)
@@ -40,8 +43,7 @@ def get_permanencia_per_year(db_conn, anio_n = None):
 
     filter_anio = ""
 
-    if isinstance(anio_n, int):
-        filter_anio = f"WHERE T1.cat_periodo = {anio_n}"
+    filter_anio = f"HAVING T1.cat_periodo = {anio_n}" if isinstance(anio_n, int) else ""
 
     sql_query = f"""
         WITH base AS (
@@ -50,76 +52,103 @@ def get_permanencia_per_year(db_conn, anio_n = None):
                 mrun
             FROM vista_matriculas_unificada
             WHERE mrun IS NOT NULL
+            AND cod_inst = 104 -- Solo estudiantes matriculados en ECAS
         ),
-        t1 AS (
-            SELECT * 
-            FROM base
-            {filter_anio}
-        ),
-        t2 AS (
-            SELECT *
-            FROM base
+        max_anio AS (
+            -- Subconsulta para encontrar el último año registrado en la base
+            SELECT MAX(cat_periodo) AS max_periodo FROM base
         )
         SELECT 
             T1.cat_periodo AS anio,
-            COUNT(DISTINCT T1.mrun) AS total_estudiantes,
-            COUNT(DISTINCT T2.mrun) AS permanencia
-        FROM t1
-        LEFT JOIN t2
+            COUNT(DISTINCT T1.mrun) AS matriculados_base,
+            COUNT(DISTINCT T2.mrun) AS permanencia_conteo,
+            -- Cálculo de la tasa de permanencia
+            CAST(
+                CAST(COUNT(DISTINCT T2.mrun) AS FLOAT) * 100 / 
+                CAST(COUNT(DISTINCT T1.mrun) AS FLOAT) AS DECIMAL(5, 2)
+            ) AS tasa_permanencia_pct
+        FROM base AS T1
+        
+        LEFT JOIN base AS T2
             ON T1.mrun = T2.mrun
             AND T1.cat_periodo + 1 = T2.cat_periodo
+        
+        WHERE T1.cat_periodo < (SELECT max_periodo FROM max_anio)
         GROUP BY T1.cat_periodo
+        {filter_anio}
         ORDER BY anio;
     """
 
-    df_total_permanecia_estudiantes = pd.read_sql(sql_query, db_conn)
+    df_total_permanencia_estudiantes = pd.read_sql(sql_query, db_conn)
 
     return df_total_permanencia_estudiantes
 
-def get_permanencia_primer_anio_per_year(db_conn, anio_n = None, cod_inst = None, nomb_carrera = None):
+def get_permanencia_ranking_por_jornada(db_conn, jornada: str, cod_ecas: int = COD_ECAS) -> pd.DataFrame:
 
-    #Metodo que obtiene la permanencia del primer año para diferentes instituciones
-    #y carreras
-    sql_query = f"""" WITH base AS (
-    SELECT 
-        cat_periodo,
-        mrun,
-        cod_inst,
-        anio_ing_carr_ori,
-        nomb_carrera
-    FROM vista_matriculas_unificada
-    WHERE mrun IS NOT NULL 
-      AND cod_inst = {cod_inst} AND nomb_carrera = {nomb_carrera}
-    ),
-    primer_anio AS (
+    """
+    Calcula la tasa de permanencia de primer año para la competencia directa 
+    (carrera de Auditoría, duración 8/9 semestres) en una JORNADA específica.
+    """
+    
+    # Aseguramos el formato de string para SQL
+    jornada_sql = jornada.replace("'", "''") 
+    
+    sql_query = f"""
+    WITH base AS (
         SELECT 
-            mrun,
-            cat_periodo AS anio_ingreso
-        FROM base
-        WHERE cat_periodo = anio_ing_carr_ori
+            vmu.cat_periodo,
+            vmu.mrun,
+            vmu.cod_inst,
+            vmu.nomb_inst,
+            vmu.anio_ing_carr_ori,
+            vmu.jornada -- Incluir la jornada
+        FROM vista_matriculas_unificada vmu
+        WHERE vmu.mrun IS NOT NULL 
+            AND vmu.jornada = '{jornada_sql}' -- FILTRO CLAVE POR JORNADA
+            AND (
+                (vmu.nomb_carrera LIKE '{CARRERA_LIKE}' AND vmu.dur_total_carr BETWEEN 8 AND 10)
+                OR vmu.cod_inst = {cod_ecas} 
+            )
+    ),
+    permanencia_base AS (
+        SELECT 
+            b1.cod_inst,
+            b1.nomb_inst,
+            b1.mrun,
+            b1.cat_periodo AS anio_ingreso,
+            b1.jornada, 
+            CASE WHEN b2.mrun IS NOT NULL THEN 1 ELSE 0 END AS permanece
+        FROM base b1
+        LEFT JOIN base b2
+            ON b1.mrun = b2.mrun
+            AND b2.cat_periodo = b1.cat_periodo + 1
+            AND b1.cod_inst = b2.cod_inst
+            AND b1.jornada = b2.jornada -- Permanencia debe ser en la misma jornada
+        WHERE b1.cat_periodo = b1.anio_ing_carr_ori
     )
     SELECT 
-        p.anio_ingreso AS anio,
-        COUNT(DISTINCT p.mrun) AS total_primer_ano,
-        COUNT(DISTINCT b2.mrun) AS permanencia
-    FROM primer_anio p
-    LEFT JOIN base b2
-        ON p.mrun = b2.mrun
-    AND b2.cat_periodo = p.anio_ingreso + 1
-    GROUP BY p.anio_ingreso
-    ORDER BY anio;
+        pb.anio_ingreso AS anio,
+        pb.nomb_inst,
+        pb.cod_inst,
+        pb.jornada,
+        COUNT(DISTINCT pb.mrun) AS total_estudiantes,
+        SUM(pb.permanece) AS permanencia_conteo,
+        CAST(
+            CAST(SUM(pb.permanece) AS FLOAT) * 100 / 
+            CAST(COUNT(DISTINCT pb.mrun) AS FLOAT) AS DECIMAL(5, 2)
+        ) AS tasa_permanencia_pct
+    FROM permanencia_base pb
+    GROUP BY pb.anio_ingreso, pb.nomb_inst, pb.cod_inst, pb.jornada
+    ORDER BY pb.anio_ingreso, tasa_permanencia_pct DESC;
     """
 
-    df_total_permanencia_primer_anio = pd.read_sql(sql_query, db_conn)
+    df_all_data = pd.read_sql(sql_query, db_conn)
+    
+    # Aquí puedes añadir la lógica de Top 5 + ECAS por año (vista en la respuesta anterior)
+    # Por simplicidad, esta función devolverá todos los datos por jornada, y el gráfico filtrará.
+    return df_all_data
 
-    return df_total_permanencia_primer_anio
 
-#Metodo para calcular continuidad año a año para los estudiantes de cierta
-#cohorte. Permite evaluar:
-#¿Cuántos estudiantes continúan después del 1er año?
-#¿Dónde ocurre el mayor abandono? (ej: entre 1° y 2° año)
-#¿Qué cohortes retuvieron mejor?
-#¿La retención está subiendo o bajando en el tiempo?
 def get_continuidad_per_year(db_conn, anio_n=None):
 
     filtro = ""
@@ -308,8 +337,6 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n=None):
                 break       
         if retorno_detectado:
             continue
-
-        print(mrun, anio_primer_fuga, "FUGA DETECTADA (Definitiva)")
         
         fugas_detectadas_supuestas.append({
             'mrun': mrun, 
@@ -432,26 +459,5 @@ def exportar_fuga_a_excel(df_destino_agrupado, df_abandono_total, anio_n):
     if df_destino_agrupado.empty and df_abandono_total.empty:
         print("No se generaron archivos de salida.")
 
-df_fuga_destino, df_abandono = get_fuga_multianual_trayectoria(db_conn, anio_n=None)
-exportar_fuga_a_excel(df_fuga_destino, df_abandono, anio_n=None)
-    
-
-# def get_fuga_ecas(db_conn, anio_n=None):
-#     #Evalua la fuga de mruns en un año x, comparando con su existencia en
-#     #el año posterior. Cual es su ultimo año en ECAS y su primer año en otra institución.
-#     #Es relevante saber la diferencia entre el primer año en esa institución y el ultimo
-#     #En ECAS. Esto nos permite poder calcular tasas de sabatico o años donde el estudiante
-#     #No estudio.
-
-# def get_institucion_fuga(db_conn, anio_n=None):
-#     #Evalua a que instituciones se fueron los estudiantes en cada año, es decir,
-#     #estudiantes que estuvieron cualquier otro año en ECAS y ahora vuelven a la educación
-#     #pero desde otra institución
-
-# def get_carrera_fuga(db_conn, anio_n=None):
-#     #Evalua la carrera a la que se fueron estos estudiantes
-
-# def get_area_fuga(db_conn, anio_n=None):
-#     #Evalua el area de conocimiento a la que se fueron estos estudiantes
-#     #luego de abandonar ECAS.
-
+#df_fuga_destino, df_abandono = get_fuga_multianual_trayectoria(db_conn, anio_n=None)
+#exportar_fuga_a_excel(df_fuga_destino, df_abandono, anio_n=None)
