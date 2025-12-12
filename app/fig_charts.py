@@ -15,6 +15,8 @@ def create_admission_chart(df: pd.DataFrame) -> go.Figure:
     """
     if df.empty:
         return go.Figure()
+
+    total_mruns_general = df['Total_Mruns'].sum()
         
     # Calcular el promedio de ingresos (Total_Mruns)
     promedio_mruns = df['Total_Mruns'].mean()
@@ -24,7 +26,7 @@ def create_admission_chart(df: pd.DataFrame) -> go.Figure:
         df,
         x='ingreso_primero',
         y='Total_Mruns',
-        title='1. Ingreso Total de Alumnos a ECAS por Año (Cohorte)',
+        title=f'1. Ingreso Total de Alumnos a ECAS por Año (Cohorte) - Total General: {total_mruns_general:,.0f} alumnos',
         labels={
             'ingreso_primero': 'Año de Ingreso (Cohorte)',
             'Total_Mruns': 'Número de Estudiantes'
@@ -44,14 +46,18 @@ def create_admission_chart(df: pd.DataFrame) -> go.Figure:
         annotation_font_color="red"
     )
     
-    # Asegura que el eje X se trate como categoría
-    fig.update_xaxes(type='category')
-    
-    # Ajustar marcadores para mayor visibilidad
     fig.update_traces(
         marker=dict(size=8, line=dict(width=2, color='DarkSlateGrey')),
-        selector=dict(mode='markers+lines') # Asegura que la capa es de líneas y marcadores
+        selector=dict(mode='markers+lines'),
+        # Formato del hover mejorado
+        hovertemplate=(
+            "<b>Año de Cohorte:</b> %{x}<br>"
+            "<b>Ingresos:</b> %{y:,.0f} estudiantes<extra></extra>"
+        )
     )
+    
+    # 4. Ajustes de eje
+    fig.update_xaxes(type='category')
     
     return fig
 
@@ -362,6 +368,231 @@ def create_fuga_area_pie_chart(df: pd.DataFrame, anio_n: Optional[int] = None) -
     fig.add_annotation(
         text=subtitle,
         x=0.5, y=-0.1, showarrow=False, font_size=10
+    )
+    
+    return fig
+
+def create_tiempo_descanso_chart(df_pivot: pd.DataFrame, anio_n: Optional[int] = None) -> go.Figure:
+    """
+    Crea un gráfico de barras (o pastel si es un solo año) mostrando la distribución 
+    porcentual del tiempo de descanso antes de volver a estudiar.
+    """
+    
+    if df_pivot.empty:
+        title = f"10. Distribución de Tiempo de Descanso (Cohorte {anio_n})" if anio_n else "10. Distribución de Tiempo de Descanso"
+        return go.Figure().update_layout(title=title, annotations=[dict(text="No hay datos disponibles.", showarrow=False)])
+
+    df_plot = df_pivot.reset_index().rename(columns={'rango_descanso': 'Rango_de_Descanso'})
+    
+    # Decidir si mostramos todas las cohortes o solo el Total General/un año
+    if anio_n is not None or len(df_plot.columns) == 2:
+        # Vista de una sola columna (Cohorte específica o TOTAL GENERAL)
+        
+        # Si anio_n está presente, usamos esa columna; si no, usamos 'TOTAL GENERAL'
+        columna_target = anio_n if anio_n is not None and anio_n in df_plot.columns else 'TOTAL GENERAL'
+        
+        # Eliminar las filas donde el porcentaje es 0 para limpiar el pastel
+        df_plot_single = df_plot[['Rango_de_Descanso', columna_target]].copy()
+        df_plot_single.rename(columns={columna_target: 'Porcentaje'}, inplace=True)
+        df_plot_single = df_plot_single[df_plot_single['Porcentaje'] > 0]
+        
+        total_reingreso = df_plot_single['Porcentaje'].sum()
+        
+        title = f"10. Distribución del Tiempo de Descanso (Cohorte {anio_n} | Reingreso: {total_reingreso:.1f}%)" if anio_n else f"10. Distribución del Tiempo de Descanso (Total General | Reingreso: {total_reingreso:.1f}%)"
+
+        # Usamos PIE CHART para una distribución de un solo conjunto
+        fig = px.pie(
+            df_plot_single,
+            values='Porcentaje',
+            names='Rango_de_Descanso',
+            title=title,
+            template='plotly_white',
+            hole=0.4
+        )
+        fig.update_traces(
+            textinfo='label+percent',
+            hovertemplate="<b>Rango:</b> %{label}<br><b>Porcentaje:</b> %{value:.1f}%<extra></extra>"
+        )
+
+    else:
+        # Vista de Múltiples Cohortes (Si anio_n es None y queremos ver la evolución de varias cohortes)
+        
+        # Reestructurar el DataFrame para Plotly Express (de ancho a largo)
+        df_long = df_plot.melt(
+            id_vars=['Rango_de_Descanso'],
+            var_name='Cohorte',
+            value_name='Porcentaje',
+            ignore_index=False
+        )
+        
+        # Excluir la columna 'TOTAL GENERAL' para esta vista, ya que es la media
+        df_long = df_long[df_long['Cohorte'] != 'TOTAL GENERAL']
+        
+        title = '10. Distribución del Tiempo de Descanso por Cohorte (Evolución)'
+
+        # Usamos BARRAS AGRUPADAS para comparar cohortes
+        fig = px.bar(
+            df_long,
+            x='Rango_de_Descanso',
+            y='Porcentaje',
+            color='Cohorte',
+            barmode='group',
+            title=title,
+            labels={'Porcentaje': 'Porcentaje de Estudiantes (%)', 'Rango_de_Descanso': 'Tiempo de Descanso'},
+            template='plotly_white'
+        )
+        
+    fig.update_yaxes(range=[0, 100], ticksuffix="%")
+    
+    return fig
+
+def create_total_fugados_chart(df_final: pd.DataFrame, anio_n: Optional[int] = None) -> go.Figure:
+    """
+    Crea un gráfico de barras apiladas (Stacked Bar Chart) mostrando el total de desertores 
+    por cohorte, desglosado en Fuga a Destino y Abandono Total.
+    """
+    if df_final.empty:
+        return go.Figure().update_layout(title="2. Total de Desertores y Distribución", annotations=[dict(text="No hay datos disponibles.", showarrow=False)])
+
+    df_plot = df_final.copy()
+
+    df_cohorts = df_plot[df_plot['año_cohorte_ecas'] != 'TOTAL GENERAL'].copy()
+    
+    total_desertores_general = df_cohorts['Total_Desertores'].sum()
+    
+    total_text = f" (Total General: {total_desertores_general:,.0f} alumnos)"
+    
+    # 1. Limpieza y preparación para el gráfico de tendencia
+    if anio_n is None:
+        # Usamos el DataFrame solo de cohortes para el gráfico de tendencia
+        df_plot = df_cohorts
+        chart_title = f'2. Total de Desertores por Cohorte y Distribución{total_text}'
+    else:
+        # Filtramos el DataFrame solo por el año específico
+        df_plot = df_cohorts[df_cohorts['año_cohorte_ecas'] == anio_n].copy()
+        
+        if df_plot.empty:
+            # Si el filtro resulta en un DataFrame vacío, devolvemos la figura sin datos
+            return go.Figure().update_layout(
+                title=f"2. Total de Desertores Cohorte {anio_n}", 
+                annotations=[dict(text=f"No hay desertores en la Cohorte {anio_n}.", showarrow=False)]
+            )
+        # Para un año específico, incluimos el total general para mantener la coherencia solicitada
+        chart_title = f'2. Distribución de Desertores: Cohorte {anio_n}{total_text}'
+
+    # 2. Reestructurar el DataFrame para apilamiento (de ancho a largo)
+    df_long = pd.melt(
+        df_plot,
+        id_vars=['año_cohorte_ecas', 'Total_Desertores', '%_Fuga_a_Destino', '%_Abandono_Total'],
+        value_vars=['Fuga_a_Destino', 'Abandono_Total'],
+        var_name='Tipo_Desercion',
+        value_name='Conteo_MRUNs'
+    )
+    
+    df_long['Porcentaje_Fila'] = df_long.apply(
+        lambda row: row['%_Fuga_a_Destino'] if row['Tipo_Desercion'] == 'Fuga_a_Destino' else row['%_Abandono_Total'], 
+        axis=1
+    )
+    
+    # 3. Crear el gráfico de barras apiladas
+    fig = px.bar(
+        df_long,
+        x='año_cohorte_ecas',
+        y='Conteo_MRUNs',
+        color='Tipo_Desercion',
+        title=chart_title, # <-- Usa el título modificado con el Total General
+        labels={
+            'año_cohorte_ecas': 'Año de Ingreso (Cohorte)',
+            'Conteo_MRUNs': 'Número de Desertores (MRUNs)',
+            'Tipo_Desercion': 'Tipo de Deserción'
+        },
+        template='plotly_white',
+        color_discrete_map={
+            'Fuga_a_Destino': '#34A853',
+            'Abandono_Total': '#EA4335'
+        }
+    )
+    
+    # 4. Añadir porcentajes y TOTAL DE COHORTE al hover
+    fig.update_traces(
+        hovertemplate=(
+            "<b>Cohorte:</b> %{x}<br>"
+            "<b>Total Desertores (Cohorte):</b> %{customdata[2]:,.0f}<br>" # Total solo de la cohorte
+            "<hr>"
+            "<b>Tipo:</b> %{customdata[0]}<br>"
+            "<b>Conteo:</b> %{y:,.0f} estudiantes<br>"
+            "<b>Porcentaje:</b> %{customdata[1]:.1f}%"
+            "<extra></extra>"
+        ),
+        # customdata contiene [Tipo_Desercion, Porcentaje_Fila, Total_Desertores (de la cohorte)]
+        customdata=df_long[['Tipo_Desercion', 'Porcentaje_Fila', 'Total_Desertores']]
+    )
+
+    return fig
+
+def create_titulacion_estimada_chart(df_final: pd.DataFrame, anio_n: Optional[int] = None) -> go.Figure:
+    """
+    Crea un gráfico de barras para visualizar la estimación del conteo de estudiantes 
+    titulados en instituciones de destino por cohorte.
+    """
+    if df_final.empty:
+        return go.Figure().update_layout(title="11. Estimación de Titulados en Destino", annotations=[dict(text="No hay datos disponibles.", showarrow=False)])
+
+    df_plot = df_final.copy()
+    
+    # 1. Preparación de datos para la visualización
+    
+    # Obtener el total general para el título
+    total_general_row = df_plot[df_plot['año_cohorte_ecas'] == 'TOTAL GENERAL'].iloc[0]
+    total_titulados_general = total_general_row['estudiantes_titulados']
+    
+    # Filtrar la vista para la gráfica
+    if anio_n is not None:
+        # Vista de una cohorte específica
+        df_plot = df_plot[df_plot['año_cohorte_ecas'] != 'TOTAL GENERAL'].copy()
+        df_plot = df_plot[df_plot['año_cohorte_ecas'] == anio_n].copy()
+        
+        if df_plot.empty:
+             return go.Figure().update_layout(title=f"11. Estimación de Titulados (Cohorte {anio_n})", annotations=[dict(text=f"No hay estimados titulados en la Cohorte {anio_n}.", showarrow=False)])
+             
+        chart_title = f'11. Estimación de Titulados en Destino (Cohorte {anio_n}) - Total General: {total_titulados_general:,.0f}'
+        
+    else:
+        # Vista de tendencia ('ALL' / Total)
+        df_plot = df_plot[df_plot['año_cohorte_ecas'] != 'TOTAL GENERAL'].copy()
+        chart_title = f'11. Estimación de Titulados en Destino por Cohorte - Total General: {total_titulados_general:,.0f}'
+
+    # Asegurar que el año es string para el eje categórico
+    df_plot['año_cohorte_ecas'] = df_plot['año_cohorte_ecas'].astype(str)
+
+    # 2. Crear el gráfico de barras
+    fig = px.bar(
+        df_plot,
+        x='año_cohorte_ecas',
+        y='estudiantes_titulados',
+        title=chart_title,
+        labels={
+            'año_cohorte_ecas': 'Año de Ingreso (Cohorte ECAS)',
+            'estudiantes_titulados': 'Estudiantes (Estimado Titulados)'
+        },
+        template='plotly_white',
+        color_discrete_sequence=['#ff9900'] # Color naranja/dorado para destacar finalización
+    )
+    
+    # 3. Ajustes de Hover
+    fig.update_traces(
+        hovertemplate=(
+            "<b>Cohorte:</b> %{x}<br>"
+            "<b>Est. Titulados:</b> %{y:,.0f}<br>"
+            "<extra></extra>"
+        ),
+        text=df_plot['estudiantes_titulados'].apply(lambda x: f'{x:,.0f}'), # Mostrar el conteo sobre la barra
+        textposition='outside'
+    )
+    
+    fig.update_layout(
+        xaxis_type='category',
+        yaxis_title='Número de Estudiantes'
     )
     
     return fig

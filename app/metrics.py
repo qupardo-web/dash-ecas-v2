@@ -156,9 +156,6 @@ def get_estimation_titulacion_abandono(anio_n: Optional[int] = None):
     if anio_n is not None:
         # Solo filtra si anio_n tiene un valor (no es None)
         df_filtrado = df_filtrado[df_filtrado['año_cohorte_ecas'] == anio_n].copy()
-        print(f"Paso 2: Filtrado por cohorte {anio_n}. Filas después del filtro: {len(df_filtrado)}")
-    else:
-        print("Paso 2: Procesando todas las cohortes (Sin filtro de año).")
         
     df = df_filtrado
     
@@ -256,11 +253,11 @@ def get_tiempo_de_descanso(anio_n: Optional[int] = None):
     df['rango_descanso'] = pd.cut(df['tiempo_de_descanso'], bins=bins, labels=labels, right=True)
     
     # 5b. Agrupar por Cohorte y Rango para contar MRUNs únicos
-    df_conteo = df.groupby(['rango_descanso', 'año_cohorte_ecas'])['mrun'].nunique().reset_index()
+    df_conteo = df.groupby(['rango_descanso', 'año_cohorte_ecas'], observed=True)['mrun'].nunique().reset_index()
     df_conteo.rename(columns={'mrun': 'conteo_mruns'}, inplace=True)
 
     # 5c. Calcular el total de desertores por cohorte (para obtener el porcentaje base)
-    total_por_cohorte = df.groupby('año_cohorte_ecas')['mrun'].nunique().reset_index()
+    total_por_cohorte = df.groupby('año_cohorte_ecas', observed=True)['mrun'].nunique().reset_index()
     total_por_cohorte.rename(columns={'mrun': 'total_desertores_cohorte'}, inplace=True)
     
     # 5d. Unir y calcular el porcentaje
@@ -272,12 +269,13 @@ def get_tiempo_de_descanso(anio_n: Optional[int] = None):
         index='rango_descanso',
         columns='año_cohorte_ecas',
         values='porcentaje',
-        fill_value=0
+        fill_value=0,
+        observed=True
     )
     
     # 5f. Calcular el Porcentaje Total General (Base: todos los desertores con destino)
     total_general_mruns = df['mrun'].nunique()
-    df_conteo_total = df.groupby('rango_descanso')['mrun'].nunique().reset_index()
+    df_conteo_total = df.groupby('rango_descanso', observed=True)['mrun'].nunique().reset_index()
     df_conteo_total['porcentaje'] = (df_conteo_total['mrun'] / total_general_mruns) * 100
     df_conteo_total.rename(columns={'porcentaje': 'TOTAL GENERAL'}, inplace=True)
     

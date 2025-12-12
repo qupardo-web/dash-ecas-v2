@@ -101,12 +101,13 @@ def get_permanencia_ranking_por_jornada(db_conn, jornada: str, cod_ecas: int = C
             vmu.cod_inst,
             vmu.nomb_inst,
             vmu.anio_ing_carr_ori,
-            vmu.jornada -- Incluir la jornada
+            vmu.jornada,
+            vmu.region_sede
         FROM vista_matriculas_unificada vmu
         WHERE vmu.mrun IS NOT NULL 
             AND vmu.jornada = '{jornada_sql}' -- FILTRO CLAVE POR JORNADA
             AND (
-                (vmu.nomb_carrera LIKE '{CARRERA_LIKE}' AND vmu.dur_total_carr BETWEEN 8 AND 10)
+                (vmu.nomb_carrera LIKE '{CARRERA_LIKE}' AND vmu.dur_total_carr BETWEEN 8 AND 10 AND vmu.region_sede = 'Metropolitana')
                 OR vmu.cod_inst = {cod_ecas} 
             )
     ),

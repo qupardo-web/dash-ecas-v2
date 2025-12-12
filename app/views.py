@@ -57,7 +57,8 @@ def create_unified_view():
             anio_ing_carr_ori,
             anio_ing_carr_act,
             cod_carrera,
-            nomb_carrera
+            nomb_carrera,
+            region_sede
         FROM dbo.{table}
         """)
 
