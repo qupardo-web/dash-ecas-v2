@@ -265,20 +265,46 @@ def agrupar_trayectoria_por_carrera(df_destino, df_fugas):
 
     return df_salida
 
-def get_fuga_multianual_trayectoria(db_conn, anio_n=None):
+def calcular_duracion_nominal_ecas(row):
+    cohorte = row['cohorte']
+    jornada = row['jornada']
+    
+    # Aseguramos que cohorte sea tratada como número (aunque en el merge debería serlo)
+    if not isinstance(cohorte, int):
+        cohorte = int(cohorte)
+
+    # Regla 1: Cohortes de 2021 en adelante
+    if cohorte >= 2021:
+        if 'DIURNA' in jornada.upper():
+            return 8 / 2.0  # 4.0 años
+        elif 'VESPERTINA' in jornada.upper():
+            return 9 / 2.0  # 4.5 años
+    
+    # Regla 2: Cohortes anteriores a 2021
+    elif cohorte < 2021:
+        if 'DIURNA' in jornada.upper():
+            return 9 / 2.0  # 4.5 años
+        elif 'VESPERTINA' in jornada.upper():
+            return 10 / 2.0 # 5.0 años
+            
+    return 0.0 # Duración 0 si la jornada/cohorte no aplica
+
+def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
     
     filtro_cohorte = f"AND anio_ing_carr_ori = {anio_n}" if isinstance(anio_n, int) else ""
 
-   #Identificacion de estudiantes en ECAS
+    # 1. Identificación de estudiantes en ECAS, OBTENIENDO JORNADA Y CARRERA DE ORIGEN
     sql_base_ecas = f"""
     SELECT 
         mrun,
         cat_periodo,
         anio_ing_carr_ori AS cohorte,
-        cod_inst
+        cod_inst,
+        jornada, 
+        nomb_carrera 
     FROM vista_matriculas_unificada
     WHERE mrun IS NOT NULL 
-    AND cod_inst = 104  -- Filtrar solo por ECAS (código 104)
+    AND cod_inst = 104 
     {filtro_cohorte}
     ORDER BY mrun, cat_periodo;
     """
@@ -287,28 +313,23 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n=None):
     
     if df_ecas_cohortes.empty:
         print("No se encontraron datos de matrículas para la cohorte especificada en ECAS.")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
-    # Identificar la cohorte inicial de cada estudiante (que ya debería ser 'cohorte')
+    # Identificar la cohorte inicial de cada estudiante (y la jornada/carrera de origen para el merge posterior)
     cohortes_iniciales = df_ecas_cohortes[['mrun', 'cohorte']].drop_duplicates()
-    
     cohortes_iniciales.dropna(subset=['cohorte'], inplace=True)
-   
+    
     if cohortes_iniciales.empty:
         print("Advertencia: No quedan cohortes válidas después de limpiar los valores nulos.")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
     
-    # Obtener el último año de registro en los datos para establecer el límite del loop
     max_anio_registro = df_ecas_cohortes['cat_periodo'].max()
-    
     if pd.isna(max_anio_registro):
-        # Si no hay datos, se podría establecer un valor de salida o lanzar una excepción
         print("Advertencia: max_anio_registro es NaN. Saliendo.")
-        return pd.DataFrame() 
+        return pd.DataFrame(), pd.DataFrame() 
     
     max_anio_registro = int(max_anio_registro)
     
-    # 3. DETECCIÓN DE FUGA MULTIANUAL (PROCESAMIENTO EN PYTHON)
     
     matrículas_ecas = set(df_ecas_cohortes[['mrun', 'cat_periodo']].apply(tuple, axis=1))
     fugas_detectadas_supuestas = []
@@ -335,7 +356,7 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n=None):
         for anio_posterior in range(anio_primer_fuga + 1, max_anio_registro + 1):
             if (mrun, anio_posterior) in matrículas_ecas:
                 retorno_detectado = True
-                break       
+                break
         if retorno_detectado:
             continue
         
@@ -348,9 +369,12 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n=None):
     df_fugas_supuestas = pd.DataFrame(fugas_detectadas_supuestas)
 
     if df_fugas_supuestas.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
         
     mruns_fuga = df_fugas_supuestas['mrun'].apply(lambda x: int(x)).tolist()
+    
+    # 3. CONSULTA DE TRAYECTORIA Y CREACIÓN DE TABLA TEMPORAL
+    
     df_mruns_temp = pd.DataFrame(mruns_fuga, columns=['mrun_fuga'])
     df_mruns_temp.to_sql('#TempMrunsFuga', db_conn, if_exists='replace', index=False, chunksize=1000)
 
@@ -370,36 +394,51 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n=None):
     
     df_trayectoria = pd.read_sql(sql_trayectoria, db_conn)
     
-    #Logica de clasificación: Egresado vs Desertor
+    
+    # Merge para obtener la jornada de ECAS y el nombre de la carrera de origen
+    df_jornada_origen = df_ecas_cohortes.groupby('mrun').agg(
+    jornada=('jornada', 'first'),
+    # No es necesario tomar 'cohorte' aquí si ya viene en df_fugas_supuestas,
+    # pero sí debemos tomar la jornada de la cohorte original.
+    cohorte_origen=('cohorte', 'first') 
+    ).reset_index()
 
-    df_fuga_base = pd.merge(df_fugas_supuestas, df_trayectoria.groupby('mrun')['duracion_total_carrera'].first().reset_index(), on='mrun', how='left')
+    df_fuga_base = pd.merge(
+    df_fugas_supuestas, 
+    df_jornada_origen[['mrun', 'jornada']], # Solo necesitamos la jornada
+    on='mrun', 
+    how='left'
+    )
 
-    # Calcular el número de años que el estudiante estuvo matriculado en ECAS
-    años_matriculados_ecas = df_ecas_cohortes.groupby('mrun')['cat_periodo'].count().reset_index()
+    df_fuga_base['duracion_nominal_ecas_años'] = df_fuga_base.apply(
+    calcular_duracion_nominal_ecas, 
+    axis=1
+    )
+    
+    # Calcular el número de AÑOS ÚNICOS que el estudiante estuvo matriculado en ECAS
+    años_matriculados_ecas = df_ecas_cohortes.groupby('mrun')['cat_periodo'].nunique().reset_index()
     años_matriculados_ecas.rename(columns={'cat_periodo': 'años_matriculados_ecas'}, inplace=True)
     
     df_fuga_base = pd.merge(df_fuga_base, años_matriculados_ecas, on='mrun', how='left')
-
-    df_fuga_base['duracion_total_carrera_años'] = np.ceil(
-        df_fuga_base['duracion_total_carrera'] / 2.0
-    )
-
-    df_fuga_base['duracion_total_carrera_años'].fillna(0, inplace=True)
-
+    
+    # Clasificación de Egresados
     df_egresados = df_fuga_base[
-        (df_fuga_base['años_matriculados_ecas'] >= df_fuga_base['duracion_total_carrera_años']) & 
-        (df_fuga_base['duracion_total_carrera_años'] > 0) # Asegurar que la duración es válida
+        (df_fuga_base['años_matriculados_ecas'] >= df_fuga_base['duracion_nominal_ecas_años']) & 
+        (df_fuga_base['duracion_nominal_ecas_años'] > 0)
     ]
     
     mruns_egresados = df_egresados['mrun'].tolist()
     
-    df_fugas_final_meta = df_fugas_supuestas[~df_fugas_supuestas['mrun'].isin(mruns_egresados)].copy()
+    # Filtrar solo los desertores
+    df_fugas_final_meta = df_fuga_base[~df_fuga_base['mrun'].isin(mruns_egresados)].copy()
     mruns_solo_desertores = df_fugas_final_meta['mrun'].tolist()
 
     if df_fugas_final_meta.empty:
         print("Todos los estudiantes fueron clasificados como Egresados o no hubo fugas.")
         return pd.DataFrame(), pd.DataFrame()
     
+    # 5. CONTINUACIÓN: Filtrar trayectorias solo para los desertores
+
     df_fugas_matriculas = df_trayectoria[df_trayectoria['mrun'].isin(mruns_solo_desertores)].copy()
 
     df_fugas_final = pd.merge(
@@ -410,6 +449,8 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n=None):
     )
     print(df_fugas_final.head())
 
+    # 6. Clasificación Fuga a Destino vs Abandono Total
+    
     df_destino = df_fugas_final[
         (df_fugas_final['anio_matricula_destino'] >= df_fugas_final['anio_fuga']) &
         (df_fugas_final['cod_inst'] != 104)
@@ -419,23 +460,23 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n=None):
     
     # Clasificar Abandono Total (Fugas sin destino posterior)
     mruns_con_destino = df_destino['mrun'].unique()
-    mruns_desertores = df_fugas_final['mrun'].unique()
-    mruns_abandono_total = [mrun for mrun in mruns_desertores if mrun not in mruns_con_destino]
+    mruns_desertores_base = df_fugas_final_meta['mrun'].unique() # Usamos la base de desertores (sin egresados)
+    mruns_abandono_total = [mrun for mrun in mruns_desertores_base if mrun not in mruns_con_destino]
     
-    df_abandono_total = df_fugas_final[df_fugas_final['mrun'].isin(mruns_abandono_total)].drop_duplicates(subset=['mrun'])
+    # Creamos df_abandono_total a partir de la meta data
+    df_abandono_total = df_fugas_final_meta[df_fugas_final_meta['mrun'].isin(mruns_abandono_total)].copy()
     df_abandono_total = df_abandono_total[['mrun', 'cohorte', 'anio_fuga']]
     df_abandono_total.rename(columns={'cohorte': 'año_cohorte_ecas', 'anio_fuga': 'año_primer_fuga'}, inplace=True)
     
-    # Generar el DataFrame de Fuga a Destino (para el archivo principal)
-    df_destino_agrupado = agrupar_trayectoria_por_carrera(df_destino, df_fugas_final)
+    # 7. Generar el DataFrame de Fuga a Destino Agrupado
+    df_destino_agrupado = agrupar_trayectoria_por_carrera(df_destino, df_fugas_final_meta) 
     
-    # Limpieza de la tabla temporal
+    # 8. Limpieza de la tabla temporal
     try:
         db_conn.execute("DROP TABLE #TempMrunsFuga;")
     except Exception:
-        pass # No es crítico si falla
+        pass 
         
-    # Retornar ambos resultados
     return df_destino_agrupado, df_abandono_total
 
 def exportar_fuga_a_excel(df_destino_agrupado, df_abandono_total, anio_n):
