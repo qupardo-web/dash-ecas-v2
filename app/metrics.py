@@ -2,6 +2,9 @@ from typing import Optional
 import pandas as pd
 import ast
 import numpy as np
+from conn_db import get_db_engine
+
+db_conn = get_db_engine()
 
 FILE_DESTINO = "fuga_a_destino_todas_cohortes.xlsx"
 FILE_ABANDONO = "abandono_total_todas_cohortes.xlsx"
@@ -130,74 +133,70 @@ def get_top_fuga_a_area(top_n: int = 10, anio_n: Optional[int] = None):
 #KPI para calcular una estimación de la titulación de los estudiantes que abandonaron.
 def get_estimation_titulacion_abandono(anio_n: Optional[int] = None):
 
-    df = pd.read_excel(FILE_DESTINO)
+    df_destino_meta = pd.read_excel(FILE_DESTINO)
 
-    def parse_list_or_empty(x):
-        if isinstance(x, str):
-            try:
-                # Usar ast.literal_eval es seguro para evaluar strings de Python
-                return ast.literal_eval(x)
-            except (ValueError, SyntaxError):
-                return []
-        return x if isinstance(x, list) else []
-    
-    list_columns = [
-        'anio_ingreso_destino', 'anio_ultimo_matricula', 'carrera_destino', 
-        'duracion_total_carrera'
-    ]
+    df_destino_meta['año_cohorte_ecas'] = pd.to_numeric(df_destino_meta['año_cohorte_ecas'], errors='coerce').fillna(-1)
+    df_destino_meta['mrun_str'] = df_destino_meta['mrun'].dropna().astype(str)
 
-    for col in list_columns:
-        df[col] = df[col].apply(parse_list_or_empty)
-    
-    df['año_cohorte_ecas'] = pd.to_numeric(df['año_cohorte_ecas'], errors='coerce').fillna(-1)
-
-    df_filtrado = df.copy()
+    df_filtrado_cohorte = df_destino_meta[
+        (df_destino_meta['año_cohorte_ecas'] >= 2007) & 
+        (df_destino_meta['año_cohorte_ecas'] <= 2025)
+    ].copy()
     
     if anio_n is not None:
-        # Solo filtra si anio_n tiene un valor (no es None)
-        df_filtrado = df_filtrado[df_filtrado['año_cohorte_ecas'] == anio_n].copy()
+        df_filtrado_cohorte = df_filtrado_cohorte[df_filtrado_cohorte['año_cohorte_ecas'] == anio_n].copy()
+
+    df_mruns_y_fuga = df_filtrado_cohorte[['mrun_str', 'año_primer_fuga']].drop_duplicates()
+    
+    mruns_con_destino = df_mruns_y_fuga['mrun_str'].tolist()
+
+    if not mruns_con_destino:
+        print("Advertencia: No se encontraron MRUNs clasificados con fuga a destino en el archivo.")
+        return pd.DataFrame()
         
-    df = df_filtrado
+    df_mruns_y_fuga.rename(columns={'mrun_str': 'mrun_fuga', 'año_primer_fuga': 'anio_fuga'}, inplace=True)
+    df_mruns_y_fuga['mrun_fuga'] = df_mruns_y_fuga['mrun_fuga'].astype(str)
     
-    df_exploded = df.explode(list_columns[0], ignore_index=True)
-    for col in list_columns[1:]:
-        df_exploded = df_exploded.explode(col, ignore_index=True)
-        
-    df_exploded.dropna(subset=['anio_ingreso_destino', 'anio_ultimo_matricula', 'duracion_total_carrera'], inplace=True)
-
-    df_exploded['anio_ingreso_destino'] = pd.to_numeric(df_exploded['anio_ingreso_destino'], errors='coerce').fillna(0).astype(int)
-    df_exploded['anio_ultimo_matricula'] = pd.to_numeric(df_exploded['anio_ultimo_matricula'], errors='coerce').fillna(0).astype(int)
-    df_exploded['duracion_total_carrera'] = pd.to_numeric(df_exploded['duracion_total_carrera'], errors='coerce').fillna(0)
-
-
-    df_exploded['tiempo_estimado_carrera'] = (
-        df_exploded['anio_ultimo_matricula'] - df_exploded['anio_ingreso_destino'] +1
-    )
+    df_mruns_y_fuga.to_sql('#TempFugas', db_conn, if_exists='replace', index=False, chunksize=500)
     
-    df_exploded['duracion_nominal_años'] = df_exploded['duracion_total_carrera'] / 2.0
+    sql_titulados_reales = f"""
+    SELECT DISTINCT
+        T.mrun
+    FROM 
+        dbo.vista_titulados_unificada_limpia T
+    INNER JOIN 
+        #TempFugas F ON T.mrun = F.mrun_fuga
+    WHERE 
+        -- Aseguramos que el registro de titulación sea POSTERIOR O IGUAL al año de fuga
+        CAST(T.cat_periodo AS INT) >= F.anio_fuga
+        -- Aseguramos que el título exista (después de la limpieza)
+        AND T.nomb_titulo_obtenido IS NOT NULL;
+    """
+
+    try:
+        df_titulados_reales = pd.read_sql(sql_titulados_reales, db_conn)
+    except Exception as e:
+        print(f"ERROR al ejecutar la consulta SQL en la vista de titulados: {e}")
+        return pd.DataFrame()
+    finally:
+        try:
+            db_conn.execute("DROP TABLE #TempFugas;")
+        except Exception:
+            pass 
+
+    mruns_titulados_reales = df_titulados_reales['mrun'].astype(str).tolist()
+
+    df_filtrado_cohorte['es_titulado_real'] = df_filtrado_cohorte['mrun_str'].isin(mruns_titulados_reales)
+
+    df_titulados_final = df_filtrado_cohorte[df_filtrado_cohorte['es_titulado_real']].copy()
     
-    df_titulados = df_exploded[
-        df_exploded['tiempo_estimado_carrera'] >= df_exploded['duracion_nominal_años']
-    ].copy()
+    total_general = df_titulados_final['mrun'].nunique()
 
-    df_titulados_filtrado = df_titulados[
-    (df_titulados['año_cohorte_ecas'] > 2006) & (df_titulados['año_cohorte_ecas'] < 2026) 
-    ].copy()
-
-    # 2. Calcular la suma total (TOTAL GENERAL) SOLO con los MRUNs filtrados
-    total_general = df_titulados_filtrado['mrun'].nunique()
-
-    # 3. Calcular el conteo por cohorte usando el DataFrame ya filtrado
-    # Primero, aseguramos la unicidad de estudiante/cohorte
-    df_titulados_unicos = df_titulados_filtrado[['mrun', 'año_cohorte_ecas']].drop_duplicates().copy()
-
-    df_conteo_cohorte = df_titulados_unicos.groupby('año_cohorte_ecas')['mrun'].count().reset_index()
+    df_conteo_cohorte = df_titulados_final.groupby('año_cohorte_ecas')['mrun'].nunique().reset_index()
     df_conteo_cohorte.rename(columns={'mrun': 'estudiantes_titulados'}, inplace=True)
     df_conteo_cohorte['año_cohorte_ecas'] = df_conteo_cohorte['año_cohorte_ecas'].astype(int)
 
-    # 4. Concatenar resultados
     df_total = pd.DataFrame([{'año_cohorte_ecas': 'TOTAL GENERAL', 'estudiantes_titulados': total_general}])
-
     df_final = pd.concat([df_conteo_cohorte, df_total], ignore_index=True)
 
     return df_final

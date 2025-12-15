@@ -470,5 +470,5 @@ def exportar_fuga_a_excel(df_destino_agrupado, df_abandono_total, anio_n):
     if df_destino_agrupado.empty and df_abandono_total.empty:
         print("No se generaron archivos de salida.")
 
-df_fuga_destino, df_abandono = get_fuga_multianual_trayectoria(db_conn, anio_n=None)
-exportar_fuga_a_excel(df_fuga_destino, df_abandono, anio_n=None)
+#df_fuga_destino, df_abandono = get_fuga_multianual_trayectoria(db_conn, anio_n=None)
+#exportar_fuga_a_excel(df_fuga_destino, df_abandono, anio_n=None)
