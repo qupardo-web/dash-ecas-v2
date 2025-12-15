@@ -48,8 +48,14 @@ titulacion_estimada_chart_initial = create_titulacion_estimada_chart(df_titulaci
 
 
 cohortes_disponibles = sorted(df_ingresos['ingreso_primero'].unique().tolist())
+
+cohortes_disponibles_completas = [
+    year for year in cohortes_disponibles 
+    if year >= 2007 and year <= 2024
+]
+
 opciones_dropdown = [{'label': 'Total General (Todas las Cohortes)', 'value': 'ALL'}] + \
-                    [{'label': str(year), 'value': year} for year in cohortes_disponibles]
+                    [{'label': str(year), 'value': year} for year in cohortes_disponibles_completas]
 
 app = dash.Dash(__name__, title="Dashboard de Deserción ECAS")
 

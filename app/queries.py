@@ -37,51 +37,65 @@ def get_mruns_per_year(db_conn, anio_n = None):
 
     return df_total_mruns
 
-def get_permanencia_per_year(db_conn, anio_n = None):
-
-    #Evalua la tasa de permanencia de todos los estudiantes año a año
-
-    filter_anio = ""
-
-    filter_anio = f"HAVING T1.cat_periodo = {anio_n}" if isinstance(anio_n, int) else ""
+def get_permanencia_per_year(db_conn, anio_n: Optional[int] = None) -> pd.DataFrame:
+    
+    # El filtro 'anio_n' se aplica a la cohorte
+    filter_cohorte = f"AND T1.cohorte = {anio_n}" if isinstance(anio_n, int) else ""
 
     sql_query = f"""
         WITH base AS (
             SELECT 
                 cat_periodo,
-                mrun
+                mrun,
+                CAST(anio_ing_carr_ori AS INT) AS cohorte 
             FROM vista_matricula_unificada
             WHERE mrun IS NOT NULL
             AND cod_inst = 104 -- Solo estudiantes matriculados en ECAS
+            AND anio_ing_carr_ori IS NOT NULL
         ),
-        max_anio AS (
-            -- Subconsulta para encontrar el último año registrado en la base
-            SELECT MAX(cat_periodo) AS max_periodo FROM base
+        matriculados_n AS (
+            -- T1: Identifica a los estudiantes matriculados en su AÑO DE INGRESO (N)
+            SELECT 
+                mrun, 
+                cohorte,
+                cohorte AS anio_n,
+                cohorte + 1 AS anio_n_plus_1
+            FROM base
+            WHERE cat_periodo = cohorte
         )
+        -- Consulta principal: Calcula la permanencia de N a N+1 para cada cohorte
         SELECT 
-            T1.cat_periodo AS anio,
-            COUNT(DISTINCT T1.mrun) AS matriculados_base,
-            COUNT(DISTINCT T2.mrun) AS permanencia_conteo,
-            -- Cálculo de la tasa de permanencia
+            T1.cohorte AS cohorte_ingreso,
+            COUNT(DISTINCT T1.mrun) AS matriculados_base, -- Tamaño de la cohorte inicial
+            COUNT(DISTINCT T2.mrun) AS retencion_conteo, -- Los que se matricularon en el año N+1
+            
+            -- Cálculo de la tasa de retención (permanencia N -> N+1)
             CAST(
                 CAST(COUNT(DISTINCT T2.mrun) AS FLOAT) * 100 / 
                 CAST(COUNT(DISTINCT T1.mrun) AS FLOAT) AS DECIMAL(5, 2)
-            ) AS tasa_permanencia_pct
-        FROM base AS T1
+            ) AS tasa_retencion_pct
+            
+        FROM matriculados_n AS T1
         
         LEFT JOIN base AS T2
+            -- Condición 1: Mismo estudiante (mrun)
             ON T1.mrun = T2.mrun
-            AND T1.cat_periodo + 1 = T2.cat_periodo
+            -- Condición 2: El estudiante aparece en la matrícula del AÑO SIGUIENTE (N+1)
+            AND T2.cat_periodo = T1.anio_n_plus_1
+            
+        -- Aplicar el filtro de cohorte si se proporciona anio_n
+        WHERE 1=1 {filter_cohorte}
         
-        WHERE T1.cat_periodo < (SELECT max_periodo FROM max_anio)
-        GROUP BY T1.cat_periodo
-        {filter_anio}
-        ORDER BY anio;
+        GROUP BY 
+            T1.cohorte
+            
+        ORDER BY 
+            T1.cohorte;
     """
 
-    df_total_permanencia_estudiantes = pd.read_sql(sql_query, db_conn)
+    df_retencion_n1 = pd.read_sql(sql_query, db_conn)
 
-    return df_total_permanencia_estudiantes
+    return df_retencion_n1
 
 def get_permanencia_ranking_por_jornada(db_conn, jornada: str, cod_ecas: int = COD_ECAS) -> pd.DataFrame:
 

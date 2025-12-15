@@ -66,22 +66,37 @@ def create_permanence_chart(df: pd.DataFrame) -> go.Figure:
     if df.empty:
         return go.Figure()
         
+    # La columna a graficar en el eje X ahora es la COHORTE
+
+    ultima_cohorte_completa = df['cohorte_ingreso'].max()
+
+    df_filtrado = df[df['cohorte_ingreso'] < ultima_cohorte_completa].copy()
+    
     fig = px.line(
-        df,
-        x='anio',
-        y='tasa_permanencia_pct',
-        title='2. Tasa de Permanencia (Retención) Anual de ECAS',
+        df_filtrado,
+
+        x='cohorte_ingreso', 
+        y='tasa_retencion_pct',
+        title='2. Tasa de Retención (Permanencia de N a N+1) por Cohorte',
         labels={
-            'anio': 'Año Base (N -> N+1)',
-            'tasa_permanencia_pct': 'Tasa de Permanencia (%)'
+            'cohorte_ingreso': 'Cohorte de Ingreso (Año N)',
+            'tasa_retencion_pct': 'Tasa de Retención al Año Siguiente (%)'
         },
-        color_discrete_sequence=['#2ca02c'], # Verde para Retención
+        color_discrete_sequence=['#1f77b4'], # Un color limpio
         template='plotly_white',
         markers=True
     )
     
-    fig.update_xaxes(type='category')
+    fig.update_xaxes(
+        type='category',
+        categoryorder='category ascending' 
+    )
     fig.update_yaxes(range=[0, 100], ticksuffix="%")
+    
+    # Añadir hover data para claridad
+    fig.update_traces(
+        hovertemplate="Cohorte %{x}<br>Retención: %{y:.2f}%<extra></extra>"
+    )
     
     return fig
 
