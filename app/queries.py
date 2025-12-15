@@ -23,7 +23,7 @@ def get_mruns_per_year(db_conn, anio_n = None):
     sql_query= f"""
     SELECT anio_ing_carr_ori AS ingreso_primero,
 	COUNT(DISTINCT mrun) AS Total_Mruns
-    FROM  vista_matriculas_unificada v
+    FROM  vista_matricula_unificada v
     WHERE cod_inst LIKE 104 
     AND anio_ing_carr_ori BETWEEN 2007 AND 2025
     AND jornada IN ('Diurna', 'Vespertina')
@@ -50,7 +50,7 @@ def get_permanencia_per_year(db_conn, anio_n = None):
             SELECT 
                 cat_periodo,
                 mrun
-            FROM vista_matriculas_unificada
+            FROM vista_matricula_unificada
             WHERE mrun IS NOT NULL
             AND cod_inst = 104 -- Solo estudiantes matriculados en ECAS
         ),
@@ -102,12 +102,13 @@ def get_permanencia_ranking_por_jornada(db_conn, jornada: str, cod_ecas: int = C
             vmu.nomb_inst,
             vmu.anio_ing_carr_ori,
             vmu.jornada,
-            vmu.region_sede
-        FROM vista_matriculas_unificada vmu
+            vmu.region_sede,
+            vmu.tipo_inst_1
+        FROM vista_matricula_unificada vmu
         WHERE vmu.mrun IS NOT NULL 
             AND vmu.jornada = '{jornada_sql}' -- FILTRO CLAVE POR JORNADA
             AND (
-                (vmu.nomb_carrera LIKE '{CARRERA_LIKE}' AND vmu.dur_total_carr BETWEEN 8 AND 10 AND vmu.region_sede = 'Metropolitana')
+                (vmu.nomb_carrera LIKE '{CARRERA_LIKE}' AND vmu.dur_total_carr BETWEEN 8 AND 10 AND vmu.region_sede = 'Metropolitana' AND vmu.tipo_inst_1 = 'Institutos Profesionales')
                 OR vmu.cod_inst = {cod_ecas} 
             )
     ),
@@ -162,7 +163,7 @@ def get_continuidad_per_year(db_conn, anio_n=None):
             mrun,
             cat_periodo,
             anio_ing_carr_ori AS cohorte
-        FROM vista_matriculas_unificada
+        FROM vista_matricula_unificada
         WHERE mrun IS NOT NULL
           AND cod_inst = 104
     ),
@@ -221,14 +222,9 @@ def get_continuidad_per_year(db_conn, anio_n=None):
 
 def agrupar_trayectoria_por_carrera(df_destino, df_fugas):
     
-    # 1. Prepara la base con la información de Fuga (MRUN, Cohorte ECAS y Año de Fuga)
     df_base = df_fugas[['mrun', 'cohorte', 'anio_fuga']].drop_duplicates()
     df_base.rename(columns={'cohorte': 'año_cohorte_ecas', 'anio_fuga': 'año_primer_fuga'}, inplace=True)
-    #Año primer fuga corresponde al año en que el estudiante no aparece por primera vez en 
-    #los registros de ECAS. ej: Estudia el 2012, se sale. El 2013 ya no aparece. Ese es su primer año de fuga.
 
-    # 2. Agrupar el DataFrame de destino (df_destino) por la clave única de trayectoria
-    # Nota: Ya no se intenta agregar la cohorte aquí, ya que no existe en df_destino
     df_agrupado = df_destino.groupby(['mrun', 'institucion_destino', 'carrera_destino']).agg(
         # El año de ingreso a ESA carrera será el mínimo de los cat_periodo
         anio_ingreso_destino=('anio_matricula_destino', 'min'),
@@ -302,7 +298,7 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tu
         cod_inst,
         jornada, 
         nomb_carrera 
-    FROM vista_matriculas_unificada
+    FROM vista_matricula_unificada
     WHERE mrun IS NOT NULL 
     AND cod_inst = 104 
     {filtro_cohorte}
@@ -387,7 +383,7 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tu
         t1.area_conocimiento AS area_conocimiento_destino,
         t1.cod_inst,
         t1.dur_total_carr as duracion_total_carrera
-    FROM vista_matriculas_unificada t1
+    FROM vista_matricula_unificada t1
     INNER JOIN #TempMrunsFuga tm ON t1.mrun = tm.mrun_fuga
     ORDER BY t1.mrun, t1.cat_periodo;
     """

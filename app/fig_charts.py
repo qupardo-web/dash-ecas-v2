@@ -5,6 +5,7 @@ import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
 from typing import Optional
+import numpy as np
 
 COD_ECAS = 104
 
@@ -449,83 +450,96 @@ def create_tiempo_descanso_chart(df_pivot: pd.DataFrame, anio_n: Optional[int] =
 def create_total_fugados_chart(df_final: pd.DataFrame, anio_n: Optional[int] = None) -> go.Figure:
     """
     Crea un gráfico de barras apiladas (Stacked Bar Chart) mostrando el total de desertores 
-    por cohorte, desglosado en Fuga a Destino y Abandono Total.
+    por cohorte, desglosado en Fuga a Destino y Abandono Total, usando go.Bar.
     """
     if df_final.empty:
         return go.Figure().update_layout(title="2. Total de Desertores y Distribución", annotations=[dict(text="No hay datos disponibles.", showarrow=False)])
 
     df_plot = df_final.copy()
-
     df_cohorts = df_plot[df_plot['año_cohorte_ecas'] != 'TOTAL GENERAL'].copy()
     
     total_desertores_general = df_cohorts['Total_Desertores'].sum()
-    
     total_text = f" (Total General: {total_desertores_general:,.0f} alumnos)"
     
-    # 1. Limpieza y preparación para el gráfico de tendencia
+    # 1. Preparación de datos (Se mantiene igual)
     if anio_n is None:
-        # Usamos el DataFrame solo de cohortes para el gráfico de tendencia
         df_plot = df_cohorts
         chart_title = f'2. Total de Desertores por Cohorte y Distribución{total_text}'
     else:
-        # Filtramos el DataFrame solo por el año específico
         df_plot = df_cohorts[df_cohorts['año_cohorte_ecas'] == anio_n].copy()
-        
         if df_plot.empty:
-            # Si el filtro resulta en un DataFrame vacío, devolvemos la figura sin datos
             return go.Figure().update_layout(
                 title=f"2. Total de Desertores Cohorte {anio_n}", 
                 annotations=[dict(text=f"No hay desertores en la Cohorte {anio_n}.", showarrow=False)]
             )
-        # Para un año específico, incluimos el total general para mantener la coherencia solicitada
         chart_title = f'2. Distribución de Desertores: Cohorte {anio_n}{total_text}'
 
-    # 2. Reestructurar el DataFrame para apilamiento (de ancho a largo)
-    df_long = pd.melt(
-        df_plot,
-        id_vars=['año_cohorte_ecas', 'Total_Desertores', '%_Fuga_a_Destino', '%_Abandono_Total'],
-        value_vars=['Fuga_a_Destino', 'Abandono_Total'],
-        var_name='Tipo_Desercion',
-        value_name='Conteo_MRUNs'
-    )
+    # 2. Reestructurar el DataFrame a formato ancho (WIDE) para go.Bar
+    # Para go.Bar, es más fácil trabajar con el formato WIDE, donde cada columna es una traza.
+    # Aseguramos el orden del eje X
+    df_plot['año_cohorte_ecas'] = df_plot['año_cohorte_ecas'].astype(str)
+    df_plot.sort_values(by='año_cohorte_ecas', inplace=True)
     
-    df_long['Porcentaje_Fila'] = df_long.apply(
-        lambda row: row['%_Fuga_a_Destino'] if row['Tipo_Desercion'] == 'Fuga_a_Destino' else row['%_Abandono_Total'], 
-        axis=1
-    )
+    # 3. Creación del objeto Figure y las Traza (go.Bar)
+    fig = go.Figure()
     
-    # 3. Crear el gráfico de barras apiladas
-    fig = px.bar(
-        df_long,
-        x='año_cohorte_ecas',
-        y='Conteo_MRUNs',
-        color='Tipo_Desercion',
-        title=chart_title, # <-- Usa el título modificado con el Total General
-        labels={
-            'año_cohorte_ecas': 'Año de Ingreso (Cohorte)',
-            'Conteo_MRUNs': 'Número de Desertores (MRUNs)',
-            'Tipo_Desercion': 'Tipo de Deserción'
-        },
-        template='plotly_white',
-        color_discrete_map={
-            'Fuga_a_Destino': '#34A853',
-            'Abandono_Total': '#EA4335'
-        }
-    )
+    # Definición de colores
+    COLOR_FUGA = '#34A853'
+    COLOR_ABANDONO = '#EA4335'
     
-    # 4. Añadir porcentajes y TOTAL DE COHORTE al hover
-    fig.update_traces(
+    # --- Traza 1: Fuga a Destino (Fuga_a_Destino) ---
+    df_fuga = df_plot.copy()
+    
+    fig.add_trace(go.Bar(
+        x=df_fuga['año_cohorte_ecas'],
+        y=df_fuga['Fuga_a_Destino'],
+        name='Fuga a Destino',
+        marker_color=COLOR_FUGA,
+        
+        # Customdata para Fuga a Destino: [Total Cohorte, % Fuga, Tipo]
+        customdata=df_fuga[['Total_Desertores', '%_Fuga_a_Destino']].values,
+        
         hovertemplate=(
             "<b>Cohorte:</b> %{x}<br>"
-            "<b>Total Desertores (Cohorte):</b> %{customdata[2]:,.0f}<br>" # Total solo de la cohorte
+            "<b>Total Desertores (Cohorte):</b> %{customdata[0]:,.0f}<br>" 
             "<hr>"
-            "<b>Tipo:</b> %{customdata[0]}<br>"
+            "<b>Tipo:</b> Fuga a Destino<br>"
             "<b>Conteo:</b> %{y:,.0f} estudiantes<br>"
             "<b>Porcentaje:</b> %{customdata[1]:.1f}%"
             "<extra></extra>"
-        ),
-        # customdata contiene [Tipo_Desercion, Porcentaje_Fila, Total_Desertores (de la cohorte)]
-        customdata=df_long[['Tipo_Desercion', 'Porcentaje_Fila', 'Total_Desertores']]
+        )
+    ))
+
+    # --- Traza 2: Abandono Total (Abandono_Total) ---
+    df_abandono = df_plot.copy()
+    
+    fig.add_trace(go.Bar(
+        x=df_abandono['año_cohorte_ecas'],
+        y=df_abandono['Abandono_Total'],
+        name='Abandono Total',
+        marker_color=COLOR_ABANDONO,
+        
+        # Customdata para Abandono Total: [Total Cohorte, % Abandono, Tipo]
+        customdata=df_abandono[['Total_Desertores', '%_Abandono_Total']].values,
+        
+        hovertemplate=(
+            "<b>Cohorte:</b> %{x}<br>"
+            "<b>Total Desertores (Cohorte):</b> %{customdata[0]:,.0f}<br>" 
+            "<hr>"
+            "<b>Tipo:</b> Abandono Total<br>"
+            "<b>Conteo:</b> %{y:,.0f} estudiantes<br>"
+            "<b>Porcentaje:</b> %{customdata[1]:.1f}%"
+            "<extra></extra>"
+        )
+    ))
+    
+    # 4. Ajustes de Layout Finales
+    fig.update_layout(
+        barmode='stack', # Apilar las barras
+        title=chart_title,
+        yaxis_title='Número de Desertores (MRUNs)',
+        xaxis_title='Año de Ingreso (Cohorte)',
+        template='plotly_white'
     )
 
     return fig

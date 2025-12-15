@@ -4,12 +4,12 @@ from conn_db import get_db_engine
 from sqlalchemy import text
 
 #Metodo para obtener los nombres de las tablas que utilizaremos.
-def get_table_names(engine):
+def get_table_names(engine, prefijo):
    
-    query = """
+    query = f"""
     SELECT TABLE_NAME 
     FROM INFORMATION_SCHEMA.TABLES 
-    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME LIKE 'matricula_[0-9]%'
+    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME LIKE '{prefijo}_[0-9]%'
     ORDER BY TABLE_NAME;
     """
     try:
@@ -23,27 +23,55 @@ def get_table_names(engine):
         print(f"ERROR al obtener nombres de tablas: {e}")
         return []
 
-def create_unified_view():
-    """Crea o reemplaza la vista unificada 'vista_matriculas_unificada'."""
+def create_unified_view(nombre, consulta_tablas):
+    """Crea o reemplaza la vista unificada."""
     engine = get_db_engine()
     if not engine:
         return False, "Error de conexión a la DB."
         
-    table_names = get_table_names(engine)
+    table_names = get_table_names(engine, nombre)
     if not table_names:
-        return False, "No se encontraron tablas 'matricula_AÑO' en la DB. ¡Asegúrate de ejecutar carga_csv.py primero!"
+        return False, "No se encontraron tablas en la DB. ¡Asegúrate de ejecutar carga_csv.py primero!"
 
     #Query para dropear la vista unificada si ya existe
-    drop_query = """
-    IF OBJECT_ID('dbo.vista_matriculas_unificada', 'V') IS NOT NULL
-        DROP VIEW dbo.vista_matriculas_unificada;
+    drop_query = f"""
+    IF OBJECT_ID('dbo.vista_{nombre}_unificada', 'V') IS NOT NULL
+        DROP VIEW dbo.vista_{nombre}_unificada;
     """
     
     # Construcción de la parte UNION ALL
     select_statements = []
     for table in table_names:
-        select_statements.append(f"""
-        SELECT 
+        select_statements.append(f"""SELECT
+        {consulta_tablas}
+        FROM dbo.{table}
+        """)
+
+    union_query = "\nUNION ALL\n".join(select_statements)
+
+    create_view_query = f"""
+    CREATE VIEW dbo.vista_{nombre}_unificada AS
+    {union_query};
+    """
+
+    try:
+        with engine.connect() as connection:
+            #Eliminar vista unificada
+            connection.execute(text(drop_query)) 
+            connection.commit()
+            
+            #Crear nueva vista unificada
+            connection.execute(text(create_view_query))
+            connection.commit()
+            
+            return True, f"Vista 'vista_{nombre}_unificada' creada/actualizada con {len(table_names)} tablas."
+            
+    except Exception as e:
+        return False, f"ERROR al crear la vista SQL: {e}"
+
+#Bloque de ejecución
+
+consulta_matricula = """ 
             CAST(cat_periodo AS INT) AS cat_periodo, 
             CAST(mrun AS BIGINT) AS mrun, 
             nomb_inst,
@@ -58,32 +86,41 @@ def create_unified_view():
             anio_ing_carr_act,
             cod_carrera,
             nomb_carrera,
-            region_sede
-        FROM dbo.{table}
-        """)
+            region_sede,
+            tipo_inst_1,
+            fec_nac_alu,
+            gen_alu,
+            rango_edad,
+            id
+            """
 
-    union_query = "\nUNION ALL\n".join(select_statements)
+consulta_titulados= """ 
+            CAST(cat_periodo AS INT) AS cat_periodo, 
+            CAST(mrun AS BIGINT) AS mrun, 
+            gen_alu, 
+            rango_edad,
+            anio_ing_carr_ori,
+            nombre_titulo_obtenido,
+            nombre_grado_obtenido,
+            fecha_obtencion_titulo,
+            tipo_inst_1,
+            tipo_inst_2,
+            tipo_inst_3,
+            cod_inst,
+            nomb_inst,
+            nomb_carrera, 
+            dur_total_carr,
+            jornada,
+            area_conocimiento,
+            tipo_plan_carr,
+            nivel_global,
+            sem_ing_carr_ori,
+            anio_ing_carr_act,
+            sem_ing_carr_act
+            """
 
-    create_view_query = f"""
-    CREATE VIEW dbo.vista_matriculas_unificada AS
-    {union_query};
-    """
+success, message = create_unified_view("matricula", consulta_matricula)
+print(message)
 
-    try:
-        with engine.connect() as connection:
-            #Eliminar vista unificada
-            connection.execute(text(drop_query)) 
-            connection.commit()
-            
-            #Crear nueva vista unificada
-            connection.execute(text(create_view_query))
-            connection.commit()
-            
-            return True, f"Vista 'vista_matriculas_unificada' creada/actualizada con {len(table_names)} tablas."
-            
-    except Exception as e:
-        return False, f"ERROR al crear la vista SQL: {e}"
-
-if __name__ == '__main__':
-    success, message = create_unified_view()
-    print(message)
+success, message = create_unified_view("titulados", consulta_titulados)
+print(message)
