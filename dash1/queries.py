@@ -164,23 +164,23 @@ def get_permanencia_ranking_por_jornada(db_conn, jornada: str, cod_ecas: int = C
 
 def get_continuidad_per_year(db_conn, anio_n=None):
 
-    filtro = ""
+    filtro_cohorte_sql = ""
     if isinstance(anio_n, int):
-        filtro = f"AND cohorte = {anio_n}"
+        # El filtro se aplicará al final, pero lo definimos aquí si lo queremos en SQL
+        filtro_cohorte_sql = f"AND s.cohorte = {anio_n}"
 
     sql_query = f"""
     WITH base AS (
-    SELECT DISTINCT
-        mrun,
-        cat_periodo,
-        CAST(anio_ing_carr_ori AS INT) AS cohorte
-    FROM vista_matricula_unificada
-    WHERE mrun IS NOT NULL
-      AND cod_inst = 104
-      AND anio_ing_carr_ori IS NOT NULL
+        SELECT DISTINCT
+            mrun,
+            cat_periodo,
+            CAST(anio_ing_carr_ori AS INT) AS cohorte
+        FROM vista_matricula_unificada
+        WHERE mrun IS NOT NULL
+          AND cod_inst = 104
+          AND anio_ing_carr_ori IS NOT NULL
     ),
 
-    -- Cohorte válida: efectivamente matriculados en su año de ingreso
     cohortes AS (
         SELECT
             mrun,
@@ -189,8 +189,8 @@ def get_continuidad_per_year(db_conn, anio_n=None):
         WHERE cat_periodo = cohorte
     ),
 
-    -- Registros solo de estudiantes que pertenecen realmente a la cohorte
     base_cohorte AS (
+        -- ... (Tu CTE existente para la base de la cohorte) ...
         SELECT
             b.mrun,
             b.cohorte,
@@ -198,34 +198,54 @@ def get_continuidad_per_year(db_conn, anio_n=None):
             b.cat_periodo - b.cohorte AS anio_rel
         FROM base b
         JOIN cohortes c
-            ON b.mrun = c.mrun
-        AND b.cohorte = c.cohorte
+            ON b.mrun = c.mrun AND b.cohorte = c.cohorte
         WHERE b.cat_periodo >= b.cohorte
     ),
 
-    -- Para cada estudiante: hasta qué año continuo sobrevive
     supervivencia_individual AS (
-    SELECT
-        mrun,
-        cohorte,
-        MAX(anio_rel) AS max_anio_rel
-    FROM (
+        -- ... (Tu CTE existente para max_anio_rel) ...
         SELECT
             mrun,
             cohorte,
-            anio_rel,
-            COUNT(*) OVER (
-                PARTITION BY mrun, cohorte
-                ORDER BY anio_rel
-                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-            ) - 1 AS secuencia
-        FROM base_cohorte
-    ) t
-    WHERE anio_rel = secuencia
-    GROUP BY mrun, cohorte
+            MAX(anio_rel) AS max_anio_rel
+        FROM (
+            SELECT
+                mrun, cohorte, anio_rel,
+                COUNT(*) OVER (
+                    PARTITION BY mrun, cohorte
+                    ORDER BY anio_rel
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) - 1 AS secuencia
+            FROM base_cohorte
+        ) t
+        WHERE anio_rel = secuencia
+        GROUP BY mrun, cohorte
     ),
 
-    -- Scaffold cohorte x año relativo
+    titulacion AS (
+        SELECT 
+            t.mrun, 
+            CAST(t.anio_ing_carr_ori AS INT) AS cohorte_ingreso,
+            t.cat_periodo AS anio_titulacion,
+            -- Calcula el año relativo de titulación
+            t.cat_periodo - CAST(t.anio_ing_carr_ori AS INT) AS anio_rel_titulacion
+        FROM vista_titulados_unificada t
+        WHERE t.cod_inst = 104 -- Solo ECAS
+        AND t.nombre_titulo_obtenido IS NOT NULL -- Solo titulados reales
+        AND t.mrun IN (SELECT mrun FROM cohortes) -- Solo alumnos de la cohorte matriculada
+    ),
+
+    titulados_por_anio AS (
+    SELECT
+        cohorte_ingreso AS cohorte,
+        anio_rel_titulacion AS anio_rel,
+        COUNT(DISTINCT mrun) AS titulados_anio
+    FROM titulacion
+    GROUP BY
+        cohorte_ingreso,
+        anio_rel_titulacion
+    ),
+
     scaffold AS (
         SELECT DISTINCT
             cohorte,
@@ -233,7 +253,6 @@ def get_continuidad_per_year(db_conn, anio_n=None):
         FROM base_cohorte
     ),
 
-    -- Total cohorte (denominador fijo)
     cohorte_totales AS (
         SELECT
             cohorte,
@@ -243,21 +262,50 @@ def get_continuidad_per_year(db_conn, anio_n=None):
     )
 
     SELECT
-        s.cohorte,
-        s.anio_rel + 1 AS anio_relativo,
-        s.cohorte + s.anio_rel AS anio_real,
-        COUNT(DISTINCT si.mrun) AS estudiantes,
-        CAST(COUNT(DISTINCT si.mrun) AS FLOAT) / ct.total_ingreso AS tasa
+    s.cohorte,
+    s.anio_rel + 1 AS anio_relativo,
+    s.cohorte + s.anio_rel AS anio_real,
+    
+    -- Supervivencia
+    COUNT(DISTINCT si.mrun) AS estudiantes_sobreviven,
+    CAST(COUNT(DISTINCT si.mrun) AS FLOAT) / ct.total_ingreso AS tasa_supervivencia,
+    
+    -- Titulación acumulada (VENTANA SOBRE AGREGADOS)
+    SUM(COALESCE(tpa.titulados_anio, 0)) OVER (
+        PARTITION BY s.cohorte
+        ORDER BY s.anio_rel
+        ROWS UNBOUNDED PRECEDING
+    ) AS titulados_acumulados,
+    
+    -- Tasa titulación acumulada
+    CAST(
+        SUM(COALESCE(tpa.titulados_anio, 0)) OVER (
+            PARTITION BY s.cohorte
+            ORDER BY s.anio_rel
+            ROWS UNBOUNDED PRECEDING
+        ) AS FLOAT
+    ) / ct.total_ingreso AS tasa_titulacion_acumulada
+
     FROM scaffold s
-    JOIN supervivencia_individual si
-        ON si.cohorte = s.cohorte
-    AND si.max_anio_rel >= s.anio_rel
-    JOIN cohorte_totales ct
+    JOIN cohorte_totales ct 
         ON ct.cohorte = s.cohorte
+
+    LEFT JOIN supervivencia_individual si 
+        ON si.cohorte = s.cohorte 
+    AND si.max_anio_rel >= s.anio_rel
+
+    LEFT JOIN titulados_por_anio tpa
+        ON tpa.cohorte = s.cohorte
+    AND tpa.anio_rel = s.anio_rel
+
+    WHERE s.anio_rel >= 0 {filtro_cohorte_sql}
+
     GROUP BY
         s.cohorte,
         s.anio_rel,
-        ct.total_ingreso
+        ct.total_ingreso,
+        tpa.titulados_anio
+
     ORDER BY
         s.cohorte,
         s.anio_rel;

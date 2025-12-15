@@ -185,75 +185,100 @@ def create_permanence_chart_jornada(df: pd.DataFrame, jornada: str, cod_ecas: in
     return fig
 
 def create_survival_chart(df: pd.DataFrame, anio_filtro: Optional[int] = None) -> go.Figure:
-    """
-    Crea un gráfico de supervivencia con líneas para cohortes y una línea adicional 
-    para el promedio general de supervivencia, limitando el eje X al máximo año relativo con datos.
-    """
     if df.empty:
-        return go.Figure().update_layout(title="5. Tasa de Continuidad Estudiantil (Supervivencia)", annotations=[dict(text="No hay datos disponibles.", showarrow=False)])
+        return go.Figure().update_layout(title="5. Tasa de Continuidad Estudiantil y Titulación", annotations=[dict(text="No hay datos disponibles.", showarrow=False)])
 
-    df['tasa_pct'] = df['tasa'] * 100
+    df['tasa_supervivencia_pct'] = df['tasa_supervivencia'] * 100
+    df['tasa_titulacion_pct'] = df['tasa_titulacion_acumulada'] * 100
     
-    df_promedio = df.groupby('anio_relativo')['tasa_pct'].mean().reset_index()
-    df_promedio.rename(columns={'tasa_pct': 'promedio_general_pct'}, inplace=True)
+    df_promedio_supervivencia = df.groupby('anio_relativo')['tasa_supervivencia_pct'].mean().reset_index().rename(columns={'tasa_supervivencia_pct': 'promedio_general_supervivencia_pct'})
     
+    df_promedio_titulacion = df.groupby('anio_relativo')['tasa_titulacion_pct'].mean().reset_index().rename(columns={'tasa_titulacion_pct': 'promedio_general_titulacion_pct'})
+
     if anio_filtro is not None and anio_filtro != 'ALL':
         df_plot = df[df['cohorte'] == int(anio_filtro)].copy()
-        chart_title = f'5. Tasa de Continuidad: Cohorte {anio_filtro} vs. Promedio'
+        chart_title = f'5. Continuidad y Titulación: Cohorte {anio_filtro} vs. Promedio'
     else:
-        # Si es 'ALL' o None, mostramos todas las cohortes y el promedio
         df_plot = df.copy()
-        chart_title = '5. Tasa de Continuidad Estudiantil (Supervivencia) por Cohorte'
+        chart_title = '5. Tasa de Continuidad Estudiantil y Titulación por Cohorte'
 
     max_anio_relativo = df_plot['anio_relativo'].max()
-    
-    max_anio_relativo_promedio = df_promedio['anio_relativo'].max()
+    limite_eje_x = max(max_anio_relativo, df_promedio_supervivencia['anio_relativo'].max())
 
-    limite_eje_x = max(max_anio_relativo, max_anio_relativo_promedio)
-    
     fig = px.line(
         df_plot,
         x='anio_relativo',
-        y='tasa_pct',
+        y='tasa_supervivencia_pct',
         color='cohorte' if anio_filtro is None or anio_filtro == 'ALL' else None,
         line_group='cohorte', 
         title=chart_title,
-        labels={
-            'anio_relativo': 'Año Relativo de Estudio',
-            'tasa_pct': 'Tasa de Supervivencia (%)',
-            'cohorte': 'Cohorte de Ingreso'
-        },
         template='plotly_white',
-        markers=True 
+        markers=True,
+        custom_data=['estudiantes_sobreviven', 'titulados_acumulados', 'cohorte'],
+        color_discrete_sequence=px.colors.qualitative.D3 # Asignar colores a las cohortes
     )
 
-    # 5. AÑADIR LA LÍNEA DE PROMEDIO GENERAL (usando go.Scatter)
     fig.add_trace(
         go.Scatter(
-            x=df_promedio['anio_relativo'],
-            y=df_promedio['promedio_general_pct'],
+            x=df_plot['anio_relativo'],
+            y=df_plot['tasa_titulacion_pct'],
             mode='lines+markers',
-            name='Promedio General de Supervivencia',
-            line=dict(color='red', dash='dash', width=3),
-            marker=dict(size=8, symbol='star'),
-            hovertemplate="<b>Promedio General:</b> %{y:.2f}%<br>Año Relativo: %{x}<extra></extra>"
+            name=f'Titulación Acumulada (Cohorte {anio_filtro})' if anio_filtro and anio_filtro != 'ALL' else 'Titulación Acumulada',
+            line=dict(color='blue', dash='solid', width=2),
+            marker=dict(size=6, symbol='circle-open'),
+            visible='legendonly' if anio_filtro is None or anio_filtro == 'ALL' else True, # Ocultar por defecto si son muchas líneas
+            customdata=df_plot[['estudiantes_sobreviven', 'titulados_acumulados', 'cohorte']].values,
+            yaxis='y',
+            hovertemplate="<b>Titulación Acumulada:</b> %{y:.2f}%<br>Año Relativo: %{x}<br>Titulados: %{customdata[1]:.0f}<extra></extra>"
         )
     )
 
-    # 6. AJUSTES FINALES
+    fig.add_trace(
+        go.Scatter(
+            x=df_promedio_supervivencia['anio_relativo'],
+            y=df_promedio_supervivencia['promedio_general_supervivencia_pct'],
+            mode='lines+markers',
+            name='Promedio General Supervivencia',
+            line=dict(color='red', dash='dash', width=3),
+            marker=dict(size=8, symbol='star'),
+            hovertemplate="<b>Promedio General (S):</b> %{y:.2f}%<br>Año Relativo: %{x}<extra></extra>"
+        )
+    )
+    
+    fig.add_trace(
+        go.Scatter(
+            x=df_promedio_titulacion['anio_relativo'],
+            y=df_promedio_titulacion['promedio_general_titulacion_pct'],
+            mode='lines+markers',
+            name='Promedio General Titulación',
+            line=dict(color='purple', dash='dash', width=3),
+            marker=dict(size=8, symbol='square-open'),
+            hovertemplate="<b>Promedio General (T):</b> %{y:.2f}%<br>Año Relativo: %{x}<extra></extra>"
+        )
+    )
+
+    
     fig.update_xaxes(
-        tickmode='linear',
-        tick0=1,
-        dtick=1,
-        title_text='Año Relativo de Estudio (1 = Primer Año)',
-        # CLAVE: Limitar el eje X. Agregamos +0.5 para dar un pequeño margen visual.
+        tickmode='linear', tick0=1, dtick=1, title_text='Año Relativo de Estudio (1 = Primer Año)',
         range=[0.5, limite_eje_x + 0.5]
     )
     fig.update_yaxes(range=[0, 100], ticksuffix="%")
     
-    # Ajuste de la leyenda (simplificado, asumiendo que el usuario verá ambas líneas)
-    fig.update_layout(showlegend=True)
+    
+    fig.update_traces(
+        hovertemplate=(
+            "<b>Cohorte:</b> %{customdata[2]}<br>"
+            "<b>Año Relativo:</b> %{x}<br>"
+            "<b>Tasa de Supervivencia:</b> %{y:.2f}%<br>"
+            "---<br>"
+            "<b>Estudiantes Activos:</b> %{customdata[0]:.0f}<br>"
+            "<b>Titulados Acumulados:</b> %{customdata[1]:.0f}"
+            "<extra></extra>"
+        ),
+        selector=lambda trace: trace.type == 'scatter' and 'Promedio' not in trace.name and 'Titulación Acumulada' not in trace.name
+    )
 
+    fig.update_layout(legend_title_text="Series")
     return fig
 
 def create_top_fuga_pie_chart(df: pd.DataFrame, anio_n: Optional[int] = None) -> go.Figure:
