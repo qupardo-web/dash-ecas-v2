@@ -82,9 +82,6 @@ def get_permanencia_per_year(db_conn, anio_n: Optional[int] = None) -> pd.DataFr
             ON T1.mrun = T2.mrun
             -- Condición 2: El estudiante aparece en la matrícula del AÑO SIGUIENTE (N+1)
             AND T2.cat_periodo = T1.anio_n_plus_1
-            
-        -- Aplicar el filtro de cohorte si se proporciona anio_n
-        WHERE 1=1 {filter_cohorte}
         
         GROUP BY 
             T1.cohorte
@@ -173,60 +170,97 @@ def get_continuidad_per_year(db_conn, anio_n=None):
 
     sql_query = f"""
     WITH base AS (
-        SELECT 
-            mrun,
-            cat_periodo,
-            anio_ing_carr_ori AS cohorte
-        FROM vista_matricula_unificada
-        WHERE mrun IS NOT NULL
-          AND cod_inst = 104
+    SELECT DISTINCT
+        mrun,
+        cat_periodo,
+        CAST(anio_ing_carr_ori AS INT) AS cohorte
+    FROM vista_matricula_unificada
+    WHERE mrun IS NOT NULL
+      AND cod_inst = 104
+      AND anio_ing_carr_ori IS NOT NULL
     ),
+
+    -- Cohorte válida: efectivamente matriculados en su año de ingreso
     cohortes AS (
-        SELECT DISTINCT
+        SELECT
             mrun,
             cohorte
         FROM base
         WHERE cat_periodo = cohorte
-        {filtro}
     ),
+
+    -- Registros solo de estudiantes que pertenecen realmente a la cohorte
+    base_cohorte AS (
+        SELECT
+            b.mrun,
+            b.cohorte,
+            b.cat_periodo,
+            b.cat_periodo - b.cohorte AS anio_rel
+        FROM base b
+        JOIN cohortes c
+            ON b.mrun = c.mrun
+        AND b.cohorte = c.cohorte
+        WHERE b.cat_periodo >= b.cohorte
+    ),
+
+    -- Para cada estudiante: hasta qué año continuo sobrevive
+    supervivencia_individual AS (
+    SELECT
+        mrun,
+        cohorte,
+        MAX(anio_rel) AS max_anio_rel
+    FROM (
+        SELECT
+            mrun,
+            cohorte,
+            anio_rel,
+            COUNT(*) OVER (
+                PARTITION BY mrun, cohorte
+                ORDER BY anio_rel
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ) - 1 AS secuencia
+        FROM base_cohorte
+    ) t
+    WHERE anio_rel = secuencia
+    GROUP BY mrun, cohorte
+    ),
+
+    -- Scaffold cohorte x año relativo
+    scaffold AS (
+        SELECT DISTINCT
+            cohorte,
+            anio_rel
+        FROM base_cohorte
+    ),
+
+    -- Total cohorte (denominador fijo)
     cohorte_totales AS (
         SELECT
             cohorte,
             COUNT(DISTINCT mrun) AS total_ingreso
         FROM cohortes
         GROUP BY cohorte
-    ),
-    years AS (
-        SELECT DISTINCT cat_periodo FROM base
-    ),
-    continuidad AS (
-        SELECT
-            c.cohorte,
-            y.cat_periodo AS anio_real,
-            y.cat_periodo - c.cohorte AS anio_rel
-        FROM cohortes c
-        JOIN years y
-            ON y.cat_periodo >= c.cohorte
     )
+
     SELECT
-        con.cohorte,
-        con.anio_rel + 1 AS anio_relativo,
-        con.anio_real,
-        COUNT(DISTINCT b.mrun) AS estudiantes,
-        CAST(COUNT(DISTINCT b.mrun) AS FLOAT) / ct.total_ingreso AS tasa
-    FROM continuidad con
-    LEFT JOIN base b
-        ON b.cohorte = con.cohorte
-       AND b.cat_periodo = con.anio_real
+        s.cohorte,
+        s.anio_rel + 1 AS anio_relativo,
+        s.cohorte + s.anio_rel AS anio_real,
+        COUNT(DISTINCT si.mrun) AS estudiantes,
+        CAST(COUNT(DISTINCT si.mrun) AS FLOAT) / ct.total_ingreso AS tasa
+    FROM scaffold s
+    JOIN supervivencia_individual si
+        ON si.cohorte = s.cohorte
+    AND si.max_anio_rel >= s.anio_rel
     JOIN cohorte_totales ct
-        ON ct.cohorte = con.cohorte
-    WHERE con.anio_rel >= 0
-    GROUP BY 
-        con.cohorte,
-        con.anio_rel,
-        con.anio_real,
+        ON ct.cohorte = s.cohorte
+    GROUP BY
+        s.cohorte,
+        s.anio_rel,
         ct.total_ingreso
-    ORDER BY cohorte, anio_relativo;
+    ORDER BY
+        s.cohorte,
+        s.anio_rel;
     """
 
     # Ejecutar

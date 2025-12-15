@@ -71,20 +71,30 @@ def create_permanence_chart(df: pd.DataFrame) -> go.Figure:
     ultima_cohorte_completa = df['cohorte_ingreso'].max()
 
     df_filtrado = df[df['cohorte_ingreso'] < ultima_cohorte_completa].copy()
+
+    promedio_retencion = df_filtrado['tasa_retencion_pct'].mean()
     
     fig = px.line(
         df_filtrado,
 
         x='cohorte_ingreso', 
         y='tasa_retencion_pct',
-        title='2. Tasa de Retención (Permanencia de N a N+1) por Cohorte',
+        title='2. Tasa de Retención De Primer Año por Cohorte',
         labels={
-            'cohorte_ingreso': 'Cohorte de Ingreso (Año N)',
+            'cohorte_ingreso': 'Año de Ingreso (Cohorte)',
             'tasa_retencion_pct': 'Tasa de Retención al Año Siguiente (%)'
         },
         color_discrete_sequence=['#1f77b4'], # Un color limpio
         template='plotly_white',
         markers=True
+    )
+
+    fig.add_hline(
+        y=promedio_retencion,
+        line_dash="dash",
+        line_color="red",
+        annotation_text=f"Promedio: {promedio_retencion:.2f}%",
+        annotation_position="top left"
     )
     
     fig.update_xaxes(
@@ -177,19 +187,16 @@ def create_permanence_chart_jornada(df: pd.DataFrame, jornada: str, cod_ecas: in
 def create_survival_chart(df: pd.DataFrame, anio_filtro: Optional[int] = None) -> go.Figure:
     """
     Crea un gráfico de supervivencia con líneas para cohortes y una línea adicional 
-    para el promedio general de supervivencia.
+    para el promedio general de supervivencia, limitando el eje X al máximo año relativo con datos.
     """
     if df.empty:
         return go.Figure().update_layout(title="5. Tasa de Continuidad Estudiantil (Supervivencia)", annotations=[dict(text="No hay datos disponibles.", showarrow=False)])
 
-    # Convertir la tasa a porcentaje para el eje Y
     df['tasa_pct'] = df['tasa'] * 100
     
-    # 1. CALCULAR EL PROMEDIO GENERAL DE SUPERVIVENCIA POR AÑO RELATIVO
     df_promedio = df.groupby('anio_relativo')['tasa_pct'].mean().reset_index()
     df_promedio.rename(columns={'tasa_pct': 'promedio_general_pct'}, inplace=True)
     
-    # 2. APLICAR EL FILTRO DE COHORTE
     if anio_filtro is not None and anio_filtro != 'ALL':
         df_plot = df[df['cohorte'] == int(anio_filtro)].copy()
         chart_title = f'5. Tasa de Continuidad: Cohorte {anio_filtro} vs. Promedio'
@@ -198,7 +205,12 @@ def create_survival_chart(df: pd.DataFrame, anio_filtro: Optional[int] = None) -
         df_plot = df.copy()
         chart_title = '5. Tasa de Continuidad Estudiantil (Supervivencia) por Cohorte'
 
-    # 3. CREAR EL GRÁFICO DE LÍNEAS BASE (Cohortes)
+    max_anio_relativo = df_plot['anio_relativo'].max()
+    
+    max_anio_relativo_promedio = df_promedio['anio_relativo'].max()
+
+    limite_eje_x = max(max_anio_relativo, max_anio_relativo_promedio)
+    
     fig = px.line(
         df_plot,
         x='anio_relativo',
@@ -207,7 +219,7 @@ def create_survival_chart(df: pd.DataFrame, anio_filtro: Optional[int] = None) -
         line_group='cohorte', 
         title=chart_title,
         labels={
-            'anio_relativo': 'Año Relativo de Estudio (1 = Primer Año)',
+            'anio_relativo': 'Año Relativo de Estudio',
             'tasa_pct': 'Tasa de Supervivencia (%)',
             'cohorte': 'Cohorte de Ingreso'
         },
@@ -215,7 +227,7 @@ def create_survival_chart(df: pd.DataFrame, anio_filtro: Optional[int] = None) -
         markers=True 
     )
 
-    # 4. AÑADIR LA LÍNEA DE PROMEDIO GENERAL (usando go.Scatter)
+    # 5. AÑADIR LA LÍNEA DE PROMEDIO GENERAL (usando go.Scatter)
     fig.add_trace(
         go.Scatter(
             x=df_promedio['anio_relativo'],
@@ -228,20 +240,19 @@ def create_survival_chart(df: pd.DataFrame, anio_filtro: Optional[int] = None) -
         )
     )
 
-    # 5. AJUSTES FINALES
+    # 6. AJUSTES FINALES
     fig.update_xaxes(
         tickmode='linear',
         tick0=1,
         dtick=1,
-        title_text='Año Relativo de Estudio (1 = Primer Año)'
+        title_text='Año Relativo de Estudio (1 = Primer Año)',
+        # CLAVE: Limitar el eje X. Agregamos +0.5 para dar un pequeño margen visual.
+        range=[0.5, limite_eje_x + 0.5]
     )
     fig.update_yaxes(range=[0, 100], ticksuffix="%")
     
-    # Si se selecciona una cohorte específica, ocultar la leyenda de cohortes, ya que solo hay una
-    if anio_filtro is not None and anio_filtro != 'ALL':
-        fig.update_layout(showlegend=True)
-    else:
-        fig.update_layout(showlegend=True) # Mostrar leyenda para ambas líneas (cohorte y promedio)
+    # Ajuste de la leyenda (simplificado, asumiendo que el usuario verá ambas líneas)
+    fig.update_layout(showlegend=True)
 
     return fig
 
