@@ -331,30 +331,37 @@ def agrupar_trayectoria_por_carrera(df_destino, df_fugas):
         anio_ingreso_destino=('anio_matricula_destino', 'min'),
         anio_ultimo_matricula=('anio_matricula_destino', 'max'),
         area_conocimiento_destino=('area_conocimiento_destino', 'first'),
-        duracion_total_carrera=('duracion_total_carrera', 'first')
+        duracion_total_carrera=('duracion_total_carrera', 'first'),
+        nivel_global=('nivel_global', 'first'), 
+        nivel_carrera_1=('nivel_carrera_1', 'first'),
+        nivel_carrera_2=('nivel_carrera_2', 'first'),
+        tipo_inst_1=('tipo_inst_1', 'first'),
+        tipo_inst_2=('tipo_inst_2', 'first'),
+        tipo_inst_3=('tipo_inst_3', 'first'),
+        requisito_ingreso=('requisito_ingreso', 'first')
     ).reset_index()
 
-    # 3. Re-agrupar por MRUN para generar las listas de trayectoria
-    df_final_estructurado = df_agrupado.groupby('mrun').agg(
-        anio_ingreso_destino=('anio_ingreso_destino', list),
-        anio_ultimo_matricula=('anio_ultimo_matricula', list),
-        institucion_destino=('institucion_destino', list),
-        carrera_destino=('carrera_destino', list),
-        area_conocimiento_destino=('area_conocimiento_destino', list),
-        duracion_total_carrera=('duracion_total_carrera', list)
-    ).reset_index()
+    columnas_a_listar = [
+        'anio_ingreso_destino', 'anio_ultimo_matricula', 'institucion_destino', 
+        'carrera_destino', 'area_conocimiento_destino', 'duracion_total_carrera',
+        'nivel_global', 'nivel_carrera_1', 'nivel_carrera_2', 'tipo_inst_1', 
+        'tipo_inst_2', 'tipo_inst_3', 'requisito_ingreso'
+    ]
+    
+    agg_dict = {col: list for col in columnas_a_listar}
+    
+    df_final_estructurado = df_agrupado.groupby('mrun').agg(agg_dict).reset_index()
 
-    # 4. Incorporar la información de trayectoria al df_base
+    # 4. Incorporar la información de trayectoria al df_base (sin cambios)
     df_salida = pd.merge(
         df_base, 
         df_final_estructurado,
         on='mrun', 
-        how='inner' # Usamos left para mantener a los que no tienen destino (abandono total)
+        how='inner' 
     )
 
-    # 5. Rellenar los NaN (para los desertores sin trayectoria posterior) con listas vacías
-    columnas_lista = ['anio_ingreso_destino', 'anio_ultimo_matricula', 'institucion_destino', 'carrera_destino', 'area_conocimiento_destino', 'duracion_total_carrera']
-    for col in columnas_lista:
+    # 5. Rellenar los NaN con listas vacías (actualizado con las nuevas columnas)
+    for col in columnas_a_listar:
         df_salida[col] = df_salida[col].apply(lambda x: x if isinstance(x, list) and x is not None else [])
 
     return df_salida
@@ -497,7 +504,14 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tu
         t1.nomb_carrera AS carrera_destino,
         t1.area_conocimiento AS area_conocimiento_destino,
         t1.cod_inst,
-        t1.dur_total_carr as duracion_total_carrera
+        t1.dur_total_carr as duracion_total_carrera,
+        t1.nivel_global,
+        t1.nivel_carrera_1,
+        t1.nivel_carrera_2,
+        t1.tipo_inst_1,
+        t1.tipo_inst_2,
+        t1.tipo_inst_3,
+        t1.requisito_ingreso
     FROM vista_matricula_unificada t1
     INNER JOIN #TempMrunsFuga tm ON t1.mrun = tm.mrun_fuga
     ORDER BY t1.mrun, t1.cat_periodo;
