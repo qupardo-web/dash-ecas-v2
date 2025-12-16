@@ -120,13 +120,16 @@ consulta_matricula = """
             nomb_carrera,
             region_sede,
             tipo_inst_1,
+            tipo_inst_2,
+            tipo_inst_3,
             fec_nac_alu,
             gen_alu,
             rango_edad,
             id,
             nivel_global,
             nivel_carrera_1,
-            nivel_carrera_2
+            nivel_carrera_2,
+            requisito_ingreso
             """
 
 consulta_titulados= """ 

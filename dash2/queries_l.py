@@ -6,17 +6,9 @@ import pandas as pd
 from queries import agrupar_trayectoria_por_carrera
 from pathlib import Path
 
-#KPI 1: Nivel de reingreso a la educación superior
-#Debemos evaluar los ex-alumnos de ECAS que se titularon, y se han matriculado nuevamente en alguna institución de educación superior en los años posteriores a su titulación.
-#Veremos si estudian una carrera de pregrado, postitulo o postgrado.
-#Usaremos la vista vista_titulados_unificada_limpia para obtener los titulados de ECAS, y luego
-#revisaremos en la vista_matricula_unificada donde se matricularon fuera de ECAS, identificando si es pregrado, postitulo o postgrado.
-#a través del campo nivel_global.
-#Finalmente, calcularemos el porcentaje de titulados que reingresaron a la educación superior por cohorte, es decir
-#por año en que ingresaron a ECAS.
-
 db_engine = get_db_engine()
 
+#Recopilación de trayectoria
 def agrupar_trayectoria_post_titulacion(df_trayectoria, df_titulados):
     """
     Agrupa la trayectoria académica posterior a la titulación ECAS.
@@ -110,7 +102,10 @@ def creacion_trayectoria_titulados(db_conn):
     m.nivel_carrera_2,
     m.cod_inst,
     m.dur_total_carr AS duracion_total_carrera,
-    m.tipo_inst_1
+    m.tipo_inst_1,
+    m.tipo_inst_2,
+    m.tipo_inst_3,
+    ISNULL(m.requisito_ingreso, 'Sin información') AS requisito_ingreso
     FROM vista_matricula_unificada m
     INNER JOIN #TempMrunsTitulados t
         ON m.mrun = t.mrun
@@ -200,7 +195,6 @@ def exportar_trayectoria_post_ecas_excel(
 
     print(f"✔ Archivo exportado correctamente en: {ruta}")
 
-
 if __name__ == "__main__":
 
     df_trayectoria_agrupada, df_trayectoria_detallada = creacion_trayectoria_titulados(db_engine)
@@ -212,4 +206,3 @@ if __name__ == "__main__":
     )
 
     print("✅ Proceso finalizado correctamente.")
-
