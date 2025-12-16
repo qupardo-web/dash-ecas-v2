@@ -281,6 +281,67 @@ def create_survival_chart(df: pd.DataFrame, anio_filtro: Optional[int] = None) -
     fig.update_layout(legend_title_text="Series")
     return fig
 
+def create_resumen_continuidad_chart(df: pd.DataFrame) -> go.Figure:
+    if df.empty:
+        return go.Figure()
+
+    df_prom = (
+        df.groupby("anio_relativo", as_index=False)
+        .agg(
+            supervivencia_pct=("tasa_supervivencia", "mean"),
+            titulacion_pct=("tasa_titulacion_acumulada", "mean"),
+            sobreviven_prom=("estudiantes_sobreviven", "mean"),
+            titulados_prom=("titulados_acumulados", "mean")
+        )
+    )
+
+    fig = go.Figure()
+
+    # 🔹 Supervivencia
+    fig.add_trace(go.Scatter(
+        x=df_prom["anio_relativo"],
+        y=df_prom["supervivencia_pct"] * 100,
+        mode="lines+markers",
+        name="Promedio Supervivencia",
+        line=dict(dash="dash", width=3),
+        marker=dict(symbol="circle"),
+        customdata=df_prom[["sobreviven_prom"]],
+        hovertemplate=(
+            "<b>Año %{x}</b><br>"
+            "Supervivencia: %{y:.1f}%<br>"
+            "Estudiantes promedio: %{customdata[0]:.0f}"
+            "<extra></extra>"
+        )
+    ))
+
+    # 🔹 Titulación
+    fig.add_trace(go.Scatter(
+        x=df_prom["anio_relativo"],
+        y=df_prom["titulacion_pct"] * 100,
+        mode="lines+markers",
+        name="Promedio Titulación Acumulada",
+        line=dict(width=3),
+        marker=dict(symbol="square"),
+        customdata=df_prom[["titulados_prom"]],
+        hovertemplate=(
+            "<b>Año %{x}</b><br>"
+            "Titulación acumulada: %{y:.1f}%<br>"
+            "Titulados promedio: %{customdata[0]:.0f}"
+            "<extra></extra>"
+        )
+    ))
+
+    fig.update_layout(
+        title="Tasa Promedio de Supervivencia y Titulación (Todas las Cohortes)",
+        xaxis_title="Año Relativo de Estudio (1 = Primer Año)",
+        yaxis_title="Porcentaje (%)",
+        yaxis=dict(range=[0, 100]),
+        template="plotly_white",
+        legend_title="Indicadores"
+    )
+
+    return fig
+
 def create_top_fuga_pie_chart(df: pd.DataFrame, anio_n: Optional[int] = None) -> go.Figure:
     """
     Crea un gráfico de pastel para visualizar la distribución de estudiantes 

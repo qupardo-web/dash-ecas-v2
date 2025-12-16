@@ -38,6 +38,7 @@ permanencia_chart = create_permanence_chart(df_permanencia_data)
 permanence_diurna_chart = create_permanence_chart_jornada(df_permanencia_diurna, JORNADA_DIURNA, COD_ECAS)
 permanence_vespertina_chart = create_permanence_chart_jornada(df_permanencia_vespertina, JORNADA_VESPERTINA, COD_ECAS)
 survival_chart_initial = create_survival_chart(df_continuidad_data, anio_filtro='ALL')
+survival_mean_chart = create_resumen_continuidad_chart(df_continuidad_data)
 fuga_destino_chart_initial = create_top_fuga_pie_chart(df_fuga_destino_all, anio_n=None)
 fuga_carrera_chart_initial = create_top_fuga_carrera_chart(df_fuga_carrera_all, anio_n=None)
 fuga_area_chart_initial = create_fuga_area_pie_chart(df_fuga_area_all, anio_n=None)
@@ -317,9 +318,12 @@ def update_vespertina_chart(selected_year):
     [Input('cohorte-dropdown', 'value')]
 )
 def update_survival_chart(selected_year):
-    # La función create_survival_chart maneja el filtrado internamente
-    # Si selected_year es 'ALL', mostrará todas las líneas.
-    return create_survival_chart(df_continuidad_data, anio_filtro=selected_year)
+    if selected_year is None or selected_year == "ALL":
+        return create_resumen_continuidad_chart(df_continuidad_data)
+
+    return create_survival_chart(
+        df_continuidad_data, anio_filtro=selected_year
+    )
 
 @app.callback(
     Output('fuga-destino-pie-chart', 'figure'),
