@@ -9,104 +9,105 @@ db_conn = get_db_engine()
 FILE_DESTINO = "fuga_a_destino_todas_cohortes.xlsx"
 FILE_ABANDONO = "abandono_total_todas_cohortes.xlsx"
 
+#Funciones auxiliares
 def split_pipe_column(x):
     if isinstance(x, str):
         return [i.strip() for i in x.split('|') if i.strip()]
     return []
 
+def get_primer_destino_df(anio_n: Optional[int] = None) -> pd.DataFrame:
+    df = pd.read_excel(FILE_DESTINO)
+
+    # Filtro por cohorte ECAS
+    if anio_n is not None:
+        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
+        df = df[df["año_cohorte_ecas"] == anio_n]
+
+    # Parseo columnas con |
+    df["institucion_destino"] = df["institucion_destino"].apply(split_pipe_column)
+    df["carrera_destino"] = df["carrera_destino"].apply(split_pipe_column)
+    df["area_conocimiento_destino"] = df["area_conocimiento_destino"].apply(split_pipe_column)
+    df["anio_ingreso_destino"] = df["anio_ingreso_destino"].apply(split_pipe_column)
+
+    # Explode sincronizado
+    df = df.explode([
+        "institucion_destino",
+        "carrera_destino",
+        "area_conocimiento_destino",
+        "anio_ingreso_destino"
+    ])
+
+    # Limpieza
+    df = df[df["institucion_destino"] != ""]
+    df["anio_ingreso_destino"] = pd.to_numeric(df["anio_ingreso_destino"], errors="coerce")
+
+    # 👉 CLAVE: quedarse con el PRIMER destino por estudiante
+    df = (
+        df
+        .sort_values(["mrun", "anio_ingreso_destino"])
+        .groupby("mrun", as_index=False)
+        .first()
+    )
+
+    return df
+
 #KPI para calcular las instituciones a las que se fueron los estudiantes que abandonaron.
 def get_top_fuga_a_destino(top_n: int = 10, anio_n: Optional[int] = None):
 
-    df = pd.read_excel(FILE_DESTINO)
-
-    if anio_n is not None:
-        df['año_cohorte_ecas'] = pd.to_numeric(df['año_cohorte_ecas'], errors='coerce')
-        df = df[df['año_cohorte_ecas'] == anio_n]
-
-    df['institucion_destino'] = df['institucion_destino'].apply(split_pipe_column)
-
-    df_exploded = df.explode('institucion_destino')
-    df_exploded = df_exploded[df_exploded['institucion_destino'] != '']
+    df = get_primer_destino_df(anio_n)
 
     df_conteo = (
-        df_exploded
-        .groupby('institucion_destino')['mrun']
+        df
+        .groupby("institucion_destino")["mrun"]
         .nunique()
-        .reset_index(name='estudiantes_recibidos')
-        .sort_values('estudiantes_recibidos', ascending=False)
+        .reset_index(name="estudiantes_recibidos")
+        .sort_values("estudiantes_recibidos", ascending=False)
         .head(top_n)
         .reset_index(drop=True)
     )
 
     df_conteo.index += 1
-    df_conteo.index.name = 'Ranking'
+    df_conteo.index.name = "Ranking"
 
     return df_conteo
 
 #KPI para calcular las carreras a las que se fueron los estudiantes que abandonaron.
 def get_top_fuga_a_carrera(top_n: int = 10, anio_n: Optional[int] = None):
 
-    df = pd.read_excel(FILE_DESTINO)
-
-    if anio_n is not None:
-        df['año_cohorte_ecas'] = pd.to_numeric(
-            df['año_cohorte_ecas'],
-            errors='coerce'
-        )
-        df = df[df['año_cohorte_ecas'] == anio_n]
-
-    # 👉 NUEVO PARSEO (formato " | ")
-    df['carrera_destino'] = df['carrera_destino'].apply(
-        lambda x: [i.strip() for i in x.split('|')] if isinstance(x, str) else []
-    )
-
-    df_exploded = df.explode('carrera_destino')
-    df_exploded = df_exploded[df_exploded['carrera_destino'] != '']
-
-    if df_exploded.empty:
-        return pd.DataFrame()
+    df = get_primer_destino_df(anio_n)
 
     df_conteo = (
-        df_exploded
-        .groupby('carrera_destino')['mrun']
+        df
+        .groupby("carrera_destino")["mrun"]
         .nunique()
-        .reset_index(name='estudiantes_recibidos')
-        .sort_values('estudiantes_recibidos', ascending=False)
+        .reset_index(name="estudiantes_recibidos")
+        .sort_values("estudiantes_recibidos", ascending=False)
         .head(top_n)
         .reset_index(drop=True)
     )
 
     df_conteo.index += 1
-    df_conteo.index.name = 'Ranking'
+    df_conteo.index.name = "Ranking"
 
     return df_conteo
 
 #KPI para calcular las areas a las que se fueron los estudiantes que abandonaron.
 def get_top_fuga_a_area(top_n: int = 10, anio_n: Optional[int] = None):
 
-    df = pd.read_excel(FILE_DESTINO)
-
-    if anio_n is not None:
-        df['año_cohorte_ecas'] = pd.to_numeric(df['año_cohorte_ecas'], errors='coerce')
-        df = df[df['año_cohorte_ecas'] == anio_n]
-
-    df['area_conocimiento_destino'] = df['area_conocimiento_destino'].apply(split_pipe_column)
-
-    df_exploded = df.explode('area_conocimiento_destino')
-    df_exploded = df_exploded[df_exploded['area_conocimiento_destino'] != '']
+    df = get_primer_destino_df(anio_n)
 
     df_conteo = (
-        df_exploded
-        .groupby('area_conocimiento_destino')['mrun']
+        df
+        .groupby("area_conocimiento_destino")["mrun"]
         .nunique()
-        .reset_index(name='estudiantes_recibidos')
-        .sort_values('estudiantes_recibidos', ascending=False)
+        .reset_index(name="estudiantes_recibidos")
+        .sort_values("estudiantes_recibidos", ascending=False)
         .head(top_n)
         .reset_index(drop=True)
     )
 
     df_conteo.index += 1
-    df_conteo.index.name = 'Ranking'
+    df_conteo.index.name = "Ranking"
 
     return df_conteo
 
@@ -349,4 +350,101 @@ def get_total_fugados_por_cohorte(anio_n: Optional[int] = None) -> pd.DataFrame:
         'Abandono_Total', '%_Abandono_Total'
     ]]
     
+    return df_final
+
+def get_tasa_desercion_por_cohorte(anio_n: Optional[int] = None) -> pd.DataFrame:
+
+    # -------------------------------------------------
+    # 1) TOTAL DE INGRESADOS A ECAS POR COHORTE
+    # -------------------------------------------------
+    sql_ingresados = """
+        SELECT
+            mrun,
+            anio_ing_carr_ori AS año_cohorte_ecas
+        FROM vista_matricula_unificada
+        WHERE mrun IS NOT NULL
+          AND cod_inst = 104
+          AND anio_ing_carr_ori BETWEEN 2007 AND 2025
+    """
+
+    df_ingresados = pd.read_sql(sql_ingresados, db_conn)
+
+    # Un estudiante cuenta una sola vez por cohorte
+    df_ingresados = (
+        df_ingresados
+        .drop_duplicates(subset=["mrun", "año_cohorte_ecas"])
+        .copy()
+    )
+
+    total_ingresados = (
+        df_ingresados
+        .groupby("año_cohorte_ecas")["mrun"]
+        .nunique()
+        .reset_index(name="Total_Ingresados")
+    )
+
+    # -------------------------------------------------
+    # 2) TOTAL DE DESERTORES POR COHORTE
+    # -------------------------------------------------
+    def _load_desertores(file_path: str) -> pd.DataFrame:
+        df = pd.read_excel(file_path)
+        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
+        df = df[(df["año_cohorte_ecas"] >= 2007) & (df["año_cohorte_ecas"] <= 2025)]
+        return df[["mrun", "año_cohorte_ecas"]]
+
+    df_destino  = _load_desertores(FILE_DESTINO)
+    df_abandono = _load_desertores(FILE_ABANDONO)
+
+    # Unificar desertores (evita doble conteo)
+    df_desertores = pd.concat([df_destino, df_abandono], ignore_index=True)
+    df_desertores = df_desertores.drop_duplicates(subset=["mrun", "año_cohorte_ecas"])
+
+    total_desertores = (
+        df_desertores
+        .groupby("año_cohorte_ecas")["mrun"]
+        .nunique()
+        .reset_index(name="Total_Desertores")
+    )
+
+    # -------------------------------------------------
+    # 3) CONSOLIDACIÓN Y CÁLCULO DE TASAS
+    # -------------------------------------------------
+    df_final = pd.merge(
+        total_ingresados,
+        total_desertores,
+        on="año_cohorte_ecas",
+        how="left"
+    ).fillna(0)
+
+    df_final["Total_Desertores"] = df_final["Total_Desertores"].astype(int)
+    df_final["No_Desertores"] = (
+        df_final["Total_Ingresados"] - df_final["Total_Desertores"]
+    )
+
+    df_final["Tasa_Desercion_%"] = (
+        df_final["Total_Desertores"] / df_final["Total_Ingresados"]
+    ) * 100
+
+    df_final["Tasa_No_Desercion_%"] = 100 - df_final["Tasa_Desercion_%"]
+
+    # -------------------------------------------------
+    # 4) FILTRO OPCIONAL POR COHORTE
+    # -------------------------------------------------
+    if anio_n is not None:
+        df_final = df_final[df_final["año_cohorte_ecas"] == anio_n].copy()
+
+    # -------------------------------------------------
+    # 5) ORDEN Y SELECCIÓN FINAL
+    # -------------------------------------------------
+    df_final = df_final.sort_values("año_cohorte_ecas").reset_index(drop=True)
+
+    df_final = df_final[[
+        "año_cohorte_ecas",
+        "Total_Ingresados",
+        "Total_Desertores",
+        "No_Desertores",
+        "Tasa_Desercion_%",
+        "Tasa_No_Desercion_%"
+    ]]
+
     return df_final

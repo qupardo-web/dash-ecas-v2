@@ -28,7 +28,6 @@ def get_mruns_per_year(db_conn, anio_n = None):
     AND anio_ing_carr_ori BETWEEN 2007 AND 2025
     AND jornada IN ('Diurna', 'Vespertina')
     AND dur_total_carr BETWEEN 8 AND 10
-	AND cat_periodo = anio_ing_carr_ori
     GROUP BY anio_ing_carr_ori
     ORDER BY ingreso_primero ASC
     """
