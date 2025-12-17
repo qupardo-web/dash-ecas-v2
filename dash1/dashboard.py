@@ -31,6 +31,8 @@ df_fuga_area_all = get_top_fuga_a_area(top_n=10, anio_n=None)
 df_tiempo_descanso_data = get_tiempo_de_descanso(anio_n=None)
 df_total_fugados_data = get_total_fugados_por_cohorte(anio_n=None)
 df_titulacion_estimada_data = get_estimation_titulacion_abandono(anio_n=None)
+df_titulados_desde_otra_inst = titulados_en_ecas_desde_otra_institucion(DB_ENGINE)
+df_desercion_data = get_tasa_desercion_por_cohorte()
 
 #Creación de gráficos
 admission_chart = create_admission_chart(df_ingresos)
@@ -45,6 +47,8 @@ fuga_area_chart_initial = create_fuga_area_pie_chart(df_fuga_area_all, anio_n=No
 tiempo_descanso_chart_initial = create_tiempo_descanso_chart(df_tiempo_descanso_data, anio_n=None)
 total_fugados_chart_initial = create_total_fugados_chart(df_total_fugados_data, anio_n=None)
 titulacion_estimada_chart_initial = create_titulacion_estimada_chart(df_titulacion_estimada_data, anio_n=None)
+titulados_desde_otra_inst_chart_initial = create_titulacion_desde_otra_inst_chart(df_titulados_desde_otra_inst)
+desercion_chart_initial = create_tasa_desercion_chart(df_desercion_data, anio_n=None)
 
 
 cohortes_disponibles = sorted(df_ingresos['ingreso_primero'].unique().tolist())
@@ -273,6 +277,64 @@ app.layout = html.Div(style={'backgroundColor': '#f8f9fa', 'padding': '20px'}, c
             ])
         ]),
     ]),
+    html.H2(
+    children='12. Titulación en ECAS de Estudiantes Provenientes de Otra Institución',
+    style={
+        'textAlign': 'left',
+        'color': '#343a40',
+        'marginTop': '20px',
+        'borderBottom': '2px solid #e9ecef',
+        'paddingBottom': '10px'
+    }
+    ),
+
+    html.Div(className='row', children=[
+        html.Div(className='col-md-12', children=[
+            html.Div(
+                style={
+                    'backgroundColor': 'white',
+                    'padding': '20px',
+                    'borderRadius': '8px',
+                    'boxShadow': '0 4px 8px rgba(0,0,0,0.1)'
+                },
+                children=[
+                    dcc.Graph(
+                        id='titulados-desde-otra-inst-chart',
+                        figure=titulados_desde_otra_inst_chart_initial
+                    )
+                ]
+            )
+        ])
+    ]),
+    html.H2(
+    children='12. Tasa de Deserción por Cohorte ECAS',
+    style={
+        'textAlign': 'left',
+        'color': '#343a40',
+        'marginTop': '20px',
+        'borderBottom': '2px solid #e9ecef',
+        'paddingBottom': '10px'
+    }
+    ),
+
+    html.Div(className='row', children=[
+        html.Div(className='col-md-12', children=[
+            html.Div(
+                style={
+                    'backgroundColor': 'white',
+                    'padding': '20px',
+                    'borderRadius': '8px',
+                    'boxShadow': '0 4px 8px rgba(0,0,0,0.1)'
+                },
+                children=[
+                    dcc.Graph(
+                        id='desercion-chart',
+                        figure=desercion_chart_initial
+                    )
+                ]
+            )
+        ])
+    ]),
 
 ])
 
@@ -473,6 +535,47 @@ def update_titulacion_estimada_chart(selected_year):
         except (ValueError, KeyError, TypeError):
             # En caso de error, volver a la vista general
             return create_titulacion_estimada_chart(df_base, anio_n=None)
+
+@app.callback(
+    Output('titulados-desde-otra-inst-chart', 'figure'),
+    [Input('cohorte-dropdown', 'value')]
+)
+def update_titulados_desde_otra_inst_chart(selected_year):
+
+    df_base = df_titulados_desde_otra_inst.copy()
+
+    # TOTAL GENERAL
+    if selected_year == 'ALL' or selected_year is None:
+        return create_titulacion_desde_otra_inst_chart(df_base)
+
+    # COHORTE ESPECÍFICA
+    try:
+        anio_int = int(selected_year)
+        df_filtered = df_base[df_base['cohorte_ecas'] == anio_int].copy()
+
+        return create_titulacion_desde_otra_inst_chart(df_filtered)
+
+    except (ValueError, TypeError):
+        return create_titulacion_desde_otra_inst_chart(df_base)
+
+@app.callback(
+    Output('desercion-chart', 'figure'),
+    Input('cohorte-dropdown', 'value')
+)
+def update_desercion_chart(selected_year):
+
+    df_base = df_desercion_data.copy()
+
+    if selected_year == 'ALL' or selected_year is None:
+        return create_tasa_desercion_chart(df_base, anio_n=None)
+
+    try:
+        anio_int = int(selected_year)
+        df_filtered = df_base[df_base["año_cohorte_ecas"] == anio_int].copy()
+        return create_tasa_desercion_chart(df_filtered, anio_n=anio_int)
+
+    except (ValueError, TypeError):
+        return create_tasa_desercion_chart(df_base, anio_n=None)
 
 if __name__ == '__main__':
     app.run(debug=True)

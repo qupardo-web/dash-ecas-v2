@@ -550,7 +550,7 @@ def create_total_fugados_chart(df_final: pd.DataFrame, anio_n: Optional[int] = N
     por cohorte, desglosado en Fuga a Destino y Abandono Total, usando go.Bar.
     """
     if df_final.empty:
-        return go.Figure().update_layout(title="2. Total de Desertores y Distribución", annotations=[dict(text="No hay datos disponibles.", showarrow=False)])
+        return go.Figure().update_layout(title="Total de Desertores y Distribución", annotations=[dict(text="No hay datos disponibles.", showarrow=False)])
 
     df_plot = df_final.copy()
     df_cohorts = df_plot[df_plot['año_cohorte_ecas'] != 'TOTAL GENERAL'].copy()
@@ -561,12 +561,12 @@ def create_total_fugados_chart(df_final: pd.DataFrame, anio_n: Optional[int] = N
     # 1. Preparación de datos (Se mantiene igual)
     if anio_n is None:
         df_plot = df_cohorts
-        chart_title = f'2. Total de Desertores por Cohorte y Distribución{total_text}'
+        chart_title = f'Total de Desertores por Cohorte y Distribución{total_text}'
     else:
         df_plot = df_cohorts[df_cohorts['año_cohorte_ecas'] == anio_n].copy()
         if df_plot.empty:
             return go.Figure().update_layout(
-                title=f"2. Total de Desertores Cohorte {anio_n}", 
+                title=f"Total de Desertores Cohorte {anio_n}", 
                 annotations=[dict(text=f"No hay desertores en la Cohorte {anio_n}.", showarrow=False)]
             )
         chart_title = f'2. Distribución de Desertores: Cohorte {anio_n}{total_text}'
@@ -706,4 +706,165 @@ def create_titulacion_estimada_chart(df_final: pd.DataFrame, anio_n: Optional[in
         yaxis_title='Número de Estudiantes'
     )
     
+    return fig
+
+def create_titulacion_desde_otra_inst_chart(df: pd.DataFrame) -> go.Figure:
+    """
+    Crea un gráfico de barras apiladas que muestra, por cohorte de ingreso a ECAS,
+    la cantidad de estudiantes provenientes de otra institución que se titularon
+    versus los que no se titularon en ECAS.
+    """
+    
+    if df.empty:
+        return go.Figure()
+    
+    # Asegurar tipo correcto
+    df = df.copy()
+    df["cohorte_ecas"] = df["cohorte_ecas"].astype(int)
+
+    total_general = df["total_provenientes"].sum()
+
+    # Pasar a formato largo para barras apiladas
+    df_long = df.melt(
+        id_vars=["cohorte_ecas"],
+        value_vars=["titulados_ecas", "no_titulados_ecas"],
+        var_name="estado",
+        value_name="cantidad"
+    )
+
+    df_long["estado"] = df_long["estado"].map({
+        "titulados_ecas": "Titulado en ECAS",
+        "no_titulados_ecas": "No titulado en ECAS"
+    })
+
+    # Crear gráfico de barras apiladas
+    fig = px.bar(
+        df_long,
+        x="cohorte_ecas",
+        y="cantidad",
+        color="estado",
+        title=(
+            "Titulación en ECAS de Estudiantes Provenientes de Otra Institución<br>"
+            f"<sup>Total general: {total_general:,.0f} estudiantes</sup>"
+        ),
+        labels={
+            "cohorte_ecas": "Cohorte de Ingreso a ECAS",
+            "cantidad": "Cantidad de Estudiantes",
+            "estado": "Estado Académico"
+        },
+        color_discrete_map={
+            "Titulado en ECAS": "#2ca02c",     # Verde
+            "No titulado en ECAS": "#d62728"   # Rojo
+        },
+        template="plotly_white",
+        text_auto=True
+    )
+
+    # Mostrar tasa de titulación como texto superior
+    fig.add_scatter(
+        x=df["cohorte_ecas"],
+        y=df["total_provenientes"],
+        text=df["tasa_titulacion_ecas"].round(1).astype(str) + "%",
+        mode="text",
+        textposition="top center",
+        showlegend=False,
+        hoverinfo="skip"
+    )
+
+    # Ajustes finales
+    fig.update_layout(
+        barmode="stack",
+        xaxis=dict(type="category"),
+        legend_title_text="Estado",
+    )
+
+    fig.update_traces(
+        hovertemplate=(
+            "<b>Cohorte ECAS:</b> %{x}<br>"
+            "<b>Estado:</b> %{legendgroup}<br>"
+            "<b>Cantidad:</b> %{y:,.0f} estudiantes<extra></extra>"
+        )
+    )
+
+    return fig
+
+def create_tasa_desercion_chart(df: pd.DataFrame, anio_n: Optional[int] = None) -> go.Figure:
+    """
+    Gráfico de barras apiladas para la Tasa de Deserción por Cohorte ECAS.
+    """
+    if df.empty:
+        return go.Figure().update_layout(
+            title="Tasa de Deserción por Cohorte",
+            annotations=[dict(text="No hay datos disponibles", showarrow=False)]
+        )
+
+    df_plot = df.copy()
+
+    # Asegurar tipo correcto
+    df_plot["año_cohorte_ecas"] = df_plot["año_cohorte_ecas"].astype(str)
+
+    # Pasar a formato largo
+    df_long = df_plot.melt(
+        id_vars=["año_cohorte_ecas"],
+        value_vars=["Total_Desertores", "No_Desertores"],
+        var_name="estado",
+        value_name="cantidad"
+    )
+
+    df_long["estado"] = df_long["estado"].map({
+        "Total_Desertores": "Desertores",
+        "No_Desertores": "No desertores"
+    })
+
+    titulo = (
+        f"Tasa de Deserción – Cohorte {anio_n}"
+        if anio_n is not None
+        else "Tasa de Deserción por Cohorte ECAS"
+    )
+
+    fig = px.bar(
+        df_long,
+        x="año_cohorte_ecas",
+        y="cantidad",
+        color="estado",
+        barmode="stack",
+        title=titulo,
+        labels={
+            "año_cohorte_ecas": "Cohorte de Ingreso",
+            "cantidad": "Cantidad de Estudiantes",
+            "estado": "Condición Académica"
+        },
+        color_discrete_map={
+            "Desertores": "#58b1ed",      # rojo
+            "No desertores": "#58ed8a"    # verde
+        },
+        template="plotly_white",
+        text_auto=True
+    )
+
+    # Texto con tasa de deserción arriba de cada barra
+    fig.add_scatter(
+        x=df_plot["año_cohorte_ecas"],
+        y=df_plot["Total_Ingresados"],
+        text=df_plot["Tasa_Desercion_%"].round(1).astype(str) + "%",
+        mode="text",
+        textposition="top center",
+        showlegend=False,
+        hoverinfo="skip"
+    )
+
+    fig.update_layout(
+        xaxis=dict(type="category"),
+        legend_title_text="Estado",
+        yaxis_title="Estudiantes"
+    )
+
+    fig.update_traces(
+        hovertemplate=(
+            "<b>Cohorte:</b> %{x}<br>"
+            "<b>Estado:</b> %{legendgroup}<br>"
+            "<b>Estudiantes:</b> %{y:,.0f}<extra></extra>"
+        )
+    )
+
     return fig

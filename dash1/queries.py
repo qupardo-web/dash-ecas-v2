@@ -28,6 +28,7 @@ def get_mruns_per_year(db_conn, anio_n = None):
     AND anio_ing_carr_ori BETWEEN 2007 AND 2025
     AND jornada IN ('Diurna', 'Vespertina')
     AND dur_total_carr BETWEEN 8 AND 10
+    AND nomb_carrera LIKE '%AUDITOR%'
     GROUP BY anio_ing_carr_ori
     ORDER BY ingreso_primero ASC
     """
@@ -51,6 +52,7 @@ def get_permanencia_per_year(db_conn, anio_n: Optional[int] = None) -> pd.DataFr
             WHERE mrun IS NOT NULL
             AND cod_inst = 104 -- Solo estudiantes matriculados en ECAS
             AND anio_ing_carr_ori IS NOT NULL
+            AND anio_ing_carr_ori BETWEEN 2007 AND 2025
         ),
         matriculados_n AS (
             -- T1: Identifica a los estudiantes matriculados en su AÑO DE INGRESO (N)
@@ -60,7 +62,6 @@ def get_permanencia_per_year(db_conn, anio_n: Optional[int] = None) -> pd.DataFr
                 cohorte AS anio_n,
                 cohorte + 1 AS anio_n_plus_1
             FROM base
-            WHERE cat_periodo = cohorte
         )
         -- Consulta principal: Calcula la permanencia de N a N+1 para cada cohorte
         SELECT 
@@ -105,53 +106,94 @@ def get_permanencia_ranking_por_jornada(db_conn, jornada: str, cod_ecas: int = C
     
     sql_query = f"""
     WITH base AS (
-        SELECT 
-            vmu.cat_periodo,
-            vmu.mrun,
-            vmu.cod_inst,
-            vmu.nomb_inst,
-            vmu.anio_ing_carr_ori,
-            vmu.jornada,
-            vmu.region_sede,
-            vmu.tipo_inst_1
-        FROM vista_matricula_unificada vmu
-        WHERE vmu.mrun IS NOT NULL 
-            AND vmu.jornada = '{jornada_sql}' -- FILTRO CLAVE POR JORNADA
-            AND (
-                (vmu.nomb_carrera LIKE '{CARRERA_LIKE}' AND vmu.dur_total_carr BETWEEN 8 AND 10 AND vmu.region_sede = 'Metropolitana' AND vmu.tipo_inst_1 = 'Institutos Profesionales')
-                OR vmu.cod_inst = {cod_ecas} 
-            )
+    SELECT
+        vmu.mrun,
+        vmu.cod_inst,
+        vmu.nomb_inst,
+        CAST(vmu.anio_ing_carr_ori AS INT) AS cohorte,
+        vmu.cat_periodo,
+        vmu.jornada
+    FROM vista_matricula_unificada vmu
+    WHERE vmu.mrun IS NOT NULL
+      AND (
+            (vmu.nomb_carrera LIKE '{CARRERA_LIKE}'
+             AND vmu.dur_total_carr BETWEEN 8 AND 10
+             AND vmu.region_sede = 'Metropolitana'
+             AND vmu.tipo_inst_1 = 'Institutos Profesionales')
+           OR vmu.cod_inst = {cod_ecas}
+      )
+      AND vmu.anio_ing_carr_ori BETWEEN 2007 AND 2025
     ),
-    permanencia_base AS (
-        SELECT 
-            b1.cod_inst,
-            b1.nomb_inst,
-            b1.mrun,
-            b1.cat_periodo AS anio_ingreso,
-            b1.jornada, 
-            CASE WHEN b2.mrun IS NOT NULL THEN 1 ELSE 0 END AS permanece
-        FROM base b1
-        LEFT JOIN base b2
-            ON b1.mrun = b2.mrun
-            AND b2.cat_periodo = b1.cat_periodo + 1
-            AND b1.cod_inst = b2.cod_inst
-            AND b1.jornada = b2.jornada -- Permanencia debe ser en la misma jornada
-        WHERE b1.cat_periodo = b1.anio_ing_carr_ori
+
+    primer_registro AS (
+        -- Primer año cronológico del estudiante en la institución
+        SELECT
+            mrun,
+            cod_inst,
+            cohorte,
+            MIN(cat_periodo) AS primer_anio
+        FROM base
+        GROUP BY mrun, cod_inst, cohorte
+    ),
+
+    cohorte_origen AS (
+        -- Asignar UNA jornada: la del primer registro
+        SELECT
+            b.mrun,
+            b.cod_inst,
+            b.nomb_inst,
+            b.cohorte,
+            b.jornada
+        FROM primer_registro pr
+        JOIN base b
+        ON b.mrun = pr.mrun
+        AND b.cod_inst = pr.cod_inst
+        AND b.cohorte = pr.cohorte
+        AND b.cat_periodo = pr.primer_anio
+        WHERE b.jornada = '{jornada_sql}'
+    ),
+
+    matriculados_n1 AS (
+        -- Matrícula en N+1 en la MISMA institución (cualquier jornada)
+        SELECT DISTINCT
+            mrun,
+            cod_inst,
+            cohorte
+        FROM base
+        WHERE cat_periodo = cohorte + 1
     )
-    SELECT 
-        pb.anio_ingreso AS anio,
-        pb.nomb_inst,
-        pb.cod_inst,
-        pb.jornada,
-        COUNT(DISTINCT pb.mrun) AS total_estudiantes,
-        SUM(pb.permanece) AS permanencia_conteo,
+
+    SELECT
+        c.cohorte AS anio,
+        c.nomb_inst,
+        c.cod_inst,
+        c.jornada,
+
+        COUNT(DISTINCT c.mrun) AS total_estudiantes,
+
+        COUNT(DISTINCT m.mrun) AS permanencia_conteo,
+
         CAST(
-            CAST(SUM(pb.permanece) AS FLOAT) * 100 / 
-            CAST(COUNT(DISTINCT pb.mrun) AS FLOAT) AS DECIMAL(5, 2)
+            COUNT(DISTINCT m.mrun) * 100.0 /
+            COUNT(DISTINCT c.mrun)
+            AS DECIMAL(5,2)
         ) AS tasa_permanencia_pct
-    FROM permanencia_base pb
-    GROUP BY pb.anio_ingreso, pb.nomb_inst, pb.cod_inst, pb.jornada
-    ORDER BY pb.anio_ingreso, tasa_permanencia_pct DESC;
+
+    FROM cohorte_origen c
+    LEFT JOIN matriculados_n1 m
+        ON m.mrun = c.mrun
+    AND m.cod_inst = c.cod_inst
+    AND m.cohorte = c.cohorte
+
+    GROUP BY
+        c.cohorte,
+        c.nomb_inst,
+        c.cod_inst,
+        c.jornada
+
+    ORDER BY
+        c.cohorte,
+        tasa_permanencia_pct DESC;
     """
 
     df_all_data = pd.read_sql(sql_query, db_conn)
@@ -587,9 +629,77 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tu
     except Exception:
         pass 
 
-    
-        
     return df_destino_agrupado, df_abandono_total
+
+#KPI: Titulados en ECAS que vienen desde otra institucion
+#Evaluar la cantidad de estudiantes por cohorte (ingreso) que entran a ECAS luego de dejar otra institución,
+#y se titulan exitosamente. Se debe evaluar la trayectoria del estudiantes antes de anio_ing_carr_ori en ECAS 
+#y ver si se titularon luego en ECAS. Se podria tomar como población total todos los estudiantes que vienen de otra institución
+#hacia ECAS, y calcular el porcentaje de titulados vs no titulados
+def titulados_en_ecas_desde_otra_institucion(db_conn, anio_n: Optional[int] = None):
+
+    filtro_cohorte = ""
+    if isinstance(anio_n, int):
+        filtro_cohorte = f"AND pb.cohorte_ecas = {anio_n}"
+
+    sql_query = f"""
+    WITH ingreso_ecas AS (
+        SELECT DISTINCT
+            mrun,
+            CAST(anio_ing_carr_ori AS INT) AS cohorte_ecas
+        FROM vista_matricula_unificada
+        WHERE cod_inst = 104
+          AND mrun IS NOT NULL
+          AND anio_ing_carr_ori BETWEEN 2007 AND 2025
+    ),
+
+    trayectoria_previa AS (
+        SELECT DISTINCT
+            vmu.mrun
+        FROM vista_matricula_unificada vmu
+        JOIN ingreso_ecas ie
+          ON vmu.mrun = ie.mrun
+        WHERE vmu.cod_inst <> 104
+          AND vmu.cat_periodo < ie.cohorte_ecas
+    ),
+
+    poblacion_base AS (
+        SELECT
+            ie.mrun,
+            ie.cohorte_ecas
+        FROM ingreso_ecas ie
+        JOIN trayectoria_previa tp
+          ON ie.mrun = tp.mrun
+    ),
+
+    titulados_ecas AS (
+        SELECT DISTINCT
+            mrun
+        FROM vista_titulados_unificada
+        WHERE cod_inst = 104
+          AND nombre_titulo_obtenido IS NOT NULL
+    )
+
+    SELECT
+        pb.cohorte_ecas,
+        COUNT(DISTINCT pb.mrun) AS total_provenientes,
+        COUNT(DISTINCT te.mrun) AS titulados_ecas,
+        COUNT(DISTINCT pb.mrun) - COUNT(DISTINCT te.mrun) AS no_titulados_ecas,
+        CAST(
+            COUNT(DISTINCT te.mrun) * 100.0 /
+            COUNT(DISTINCT pb.mrun)
+            AS DECIMAL(5,2)
+        ) AS tasa_titulacion_ecas
+    FROM poblacion_base pb
+    LEFT JOIN titulados_ecas te
+      ON pb.mrun = te.mrun
+    WHERE 1 = 1
+    {filtro_cohorte}
+    GROUP BY pb.cohorte_ecas
+    ORDER BY pb.cohorte_ecas;
+    """
+
+    return pd.read_sql(sql_query, db_conn)
 
 def exportar_fuga_a_excel(df_destino_agrupado, df_abandono_total, anio_n):
     # Exporta los DataFrames de Fuga a Destino y Abandono Total a archivos Excel separados
