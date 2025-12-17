@@ -485,78 +485,63 @@ def create_fuga_area_pie_chart(df: pd.DataFrame, anio_n: Optional[int] = None) -
     
     return fig
 
-def create_tiempo_descanso_chart(df_pivot: pd.DataFrame, anio_n: Optional[int] = None) -> go.Figure:
-    """
-    Crea un gráfico de barras (o pastel si es un solo año) mostrando la distribución 
-    porcentual del tiempo de descanso antes de volver a estudiar.
-    """
-    
+def create_tiempo_descanso_chart(df_pivot: pd.DataFrame, anio_n: Optional[int] = None):
+
     if df_pivot.empty:
-        title = f"10. Distribución de Tiempo de Descanso (Cohorte {anio_n})" if anio_n else "10. Distribución de Tiempo de Descanso"
-        return go.Figure().update_layout(title=title, annotations=[dict(text="No hay datos disponibles.", showarrow=False)])
-
-    df_plot = df_pivot.reset_index().rename(columns={'rango_descanso': 'Rango_de_Descanso'})
-    
-    # Decidir si mostramos todas las cohortes o solo el Total General/un año
-    if anio_n is not None or len(df_plot.columns) == 2:
-        # Vista de una sola columna (Cohorte específica o TOTAL GENERAL)
-        
-        # Si anio_n está presente, usamos esa columna; si no, usamos 'TOTAL GENERAL'
-        columna_target = anio_n if anio_n is not None and anio_n in df_plot.columns else 'TOTAL GENERAL'
-        
-        # Eliminar las filas donde el porcentaje es 0 para limpiar el pastel
-        df_plot_single = df_plot[['Rango_de_Descanso', columna_target]].copy()
-        df_plot_single.rename(columns={columna_target: 'Porcentaje'}, inplace=True)
-        df_plot_single = df_plot_single[df_plot_single['Porcentaje'] > 0]
-        
-        total_reingreso = df_plot_single['Porcentaje'].sum()
-        
-        title = f"10. Distribución del Tiempo de Descanso (Cohorte {anio_n} | Reingreso: {total_reingreso:.1f}%)" if anio_n else f"10. Distribución del Tiempo de Descanso (Total General | Reingreso: {total_reingreso:.1f}%)"
-
-        # Usamos PIE CHART para una distribución de un solo conjunto
-        fig = px.pie(
-            df_plot_single,
-            values='Porcentaje',
-            names='Rango_de_Descanso',
+        title = (
+            f"10. Distribución de Tiempo de Descanso (Cohorte {anio_n})"
+            if anio_n else
+            "10. Distribución de Tiempo de Descanso"
+        )
+        return go.Figure().update_layout(
             title=title,
-            template='plotly_white',
-            hole=0.4
-        )
-        fig.update_traces(
-            textinfo='label+percent',
-            hovertemplate="<b>Rango:</b> %{label}<br><b>Porcentaje:</b> %{value:.1f}%<extra></extra>"
+            annotations=[dict(text="No hay datos disponibles.", showarrow=False)]
         )
 
-    else:
-        # Vista de Múltiples Cohortes (Si anio_n es None y queremos ver la evolución de varias cohortes)
-        
-        # Reestructurar el DataFrame para Plotly Express (de ancho a largo)
-        df_long = df_plot.melt(
-            id_vars=['Rango_de_Descanso'],
-            var_name='Cohorte',
-            value_name='Porcentaje',
-            ignore_index=False
-        )
-        
-        # Excluir la columna 'TOTAL GENERAL' para esta vista, ya que es la media
-        df_long = df_long[df_long['Cohorte'] != 'TOTAL GENERAL']
-        
-        title = '10. Distribución del Tiempo de Descanso por Cohorte (Evolución)'
+    # 👉 NO reset_index, NO rename
+    df_plot = df_pivot.copy()
 
-        # Usamos BARRAS AGRUPADAS para comparar cohortes
-        fig = px.bar(
-            df_long,
-            x='Rango_de_Descanso',
-            y='Porcentaje',
-            color='Cohorte',
-            barmode='group',
-            title=title,
-            labels={'Porcentaje': 'Porcentaje de Estudiantes (%)', 'Rango_de_Descanso': 'Tiempo de Descanso'},
-            template='plotly_white'
-        )
-        
-    fig.update_yaxes(range=[0, 100], ticksuffix="%")
-    
+    # Selección de columna
+    columna_target = (
+        anio_n if anio_n is not None and anio_n in df_plot.columns
+        else 'TOTAL GENERAL'
+    )
+
+    df_plot_single = df_plot[
+        ['Rango_de_Descanso', columna_target]
+    ].copy()
+
+    df_plot_single.rename(
+        columns={columna_target: 'Porcentaje'},
+        inplace=True
+    )
+
+    df_plot_single = df_plot_single[df_plot_single['Porcentaje'] > 0]
+
+    total_reingreso = df_plot_single['Porcentaje'].sum()
+
+    title = (
+        f"10. Distribución del Tiempo de Descanso (Cohorte {anio_n} | Reingreso: {total_reingreso:.1f}%)"
+        if anio_n else
+        f"10. Distribución del Tiempo de Descanso (Total General | Reingreso: {total_reingreso:.1f}%)"
+    )
+
+    fig = px.pie(
+        df_plot_single,
+        values='Porcentaje',
+        names='Rango_de_Descanso',
+        hole=0.4,
+        title=title,
+        template='plotly_white'
+    )
+
+    fig.update_traces(
+        textinfo='label+percent',
+        hovertemplate="<b>Rango:</b> %{label}<br><b>Porcentaje:</b> %{value:.1f}%<extra></extra>"
+    )
+
+    fig.update_yaxes(range=[0, 100])
+
     return fig
 
 def create_total_fugados_chart(df_final: pd.DataFrame, anio_n: Optional[int] = None) -> go.Figure:

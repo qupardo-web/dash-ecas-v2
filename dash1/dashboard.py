@@ -42,8 +42,7 @@ survival_mean_chart = create_resumen_continuidad_chart(df_continuidad_data)
 fuga_destino_chart_initial = create_top_fuga_pie_chart(df_fuga_destino_all, anio_n=None)
 fuga_carrera_chart_initial = create_top_fuga_carrera_chart(df_fuga_carrera_all, anio_n=None)
 fuga_area_chart_initial = create_fuga_area_pie_chart(df_fuga_area_all, anio_n=None)
-df_total_general_pivot = df_tiempo_descanso_data[['TOTAL GENERAL']].copy()
-tiempo_descanso_chart_initial = create_tiempo_descanso_chart(df_total_general_pivot, anio_n=None)
+tiempo_descanso_chart_initial = create_tiempo_descanso_chart(df_tiempo_descanso_data, anio_n=None)
 total_fugados_chart_initial = create_total_fugados_chart(df_total_fugados_data, anio_n=None)
 titulacion_estimada_chart_initial = create_titulacion_estimada_chart(df_titulacion_estimada_data, anio_n=None)
 
@@ -90,7 +89,7 @@ app.layout = html.Div(style={'backgroundColor': '#f8f9fa', 'padding': '20px'}, c
         html.Div(className='col-md-12', children=[
             html.Div(style={'backgroundColor': 'white', 'padding': '20px', 'borderRadius': '8px', 'boxShadow': '0 4px 8px rgba(0,0,0,0.1)'}, children=[
                 dcc.Graph(
-                    id='permanencia-total-chart', #Considera todos en el año, no solo los que ingresaron como primer año en esa cohorte
+                    id='permanencia-total-chart',
                     figure=permanencia_chart
                 )
             ])
@@ -385,33 +384,39 @@ def update_fuga_area_pie_chart(selected_year):
 
 @app.callback(
     Output('tiempo-descanso-chart', 'figure'),
-    [Input('cohorte-dropdown', 'value')]
+    Input('cohorte-dropdown', 'value')
 )
 def update_tiempo_descanso_chart(selected_year):
-    
-    # Usamos el DataFrame completo cargado inicialmente (df_tiempo_descanso_data)
+
     df_base = df_tiempo_descanso_data.copy()
-    
-    if selected_year == 'ALL':
-        # Mostrar TOTAL GENERAL
-        df_filtered_pivot = df_base[['TOTAL GENERAL']].copy()
-        return create_tiempo_descanso_chart(df_filtered_pivot, anio_n=None)
-    else:
-        # Mostrar una Cohorte específica (Pie Chart)
-        try:
-            anio_int = int(selected_year)
-            # Pasamos solo la columna de la cohorte seleccionada
-            if anio_int in df_base.columns:
-                df_filtered_pivot = df_base[[anio_int]].copy()
-                return create_tiempo_descanso_chart(df_filtered_pivot, anio_n=anio_int)
-            else:
-                # Si la cohorte existe en el dropdown pero no en los datos (ej: filtro de top 5)
-                return create_tiempo_descanso_chart(pd.DataFrame(), anio_n=anio_int)
-                
-        except (ValueError, KeyError, TypeError):
-            # En caso de error, volver al total general
-            df_filtered_pivot = df_base[['TOTAL GENERAL']].copy()
-            return create_tiempo_descanso_chart(df_filtered_pivot, anio_n=None)
+
+    # TOTAL GENERAL
+    if selected_year == 'ALL' or selected_year is None:
+        df_filtered = df_base[
+            ['Rango_de_Descanso', 'TOTAL GENERAL']
+        ].copy()
+
+        return create_tiempo_descanso_chart(df_filtered, anio_n=None)
+
+    # Cohorte específica
+    try:
+        anio_int = int(selected_year)
+
+        if anio_int in df_base.columns:
+            df_filtered = df_base[
+                ['Rango_de_Descanso', anio_int]
+            ].copy()
+
+            return create_tiempo_descanso_chart(df_filtered, anio_n=anio_int)
+
+        return create_tiempo_descanso_chart(pd.DataFrame(), anio_n=anio_int)
+
+    except (ValueError, TypeError):
+        df_filtered = df_base[
+            ['Rango_de_Descanso', 'TOTAL GENERAL']
+        ].copy()
+
+        return create_tiempo_descanso_chart(df_filtered, anio_n=None)
 
 @app.callback(
     Output('total-fugados-chart', 'figure'),

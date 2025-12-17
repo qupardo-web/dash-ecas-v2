@@ -9,126 +9,106 @@ db_conn = get_db_engine()
 FILE_DESTINO = "fuga_a_destino_todas_cohortes.xlsx"
 FILE_ABANDONO = "abandono_total_todas_cohortes.xlsx"
 
+def split_pipe_column(x):
+    if isinstance(x, str):
+        return [i.strip() for i in x.split('|') if i.strip()]
+    return []
+
 #KPI para calcular las instituciones a las que se fueron los estudiantes que abandonaron.
 def get_top_fuga_a_destino(top_n: int = 10, anio_n: Optional[int] = None):
+
     df = pd.read_excel(FILE_DESTINO)
 
-    df_filtrado = df.copy()
-
     if anio_n is not None:
-        df_filtrado['año_cohorte_ecas'] = pd.to_numeric(df_filtrado['año_cohorte_ecas'], errors='coerce').fillna(-1)
-        df_filtrado = df_filtrado[df_filtrado['año_cohorte_ecas'] == anio_n].copy()
-    
-    def parse_list_or_empty(x):
-        if isinstance(x, str):
-            try:
-                import ast
-                return ast.literal_eval(x)
-            except (ValueError, SyntaxError):
-                return []
-        return x if isinstance(x, list) else []
+        df['año_cohorte_ecas'] = pd.to_numeric(df['año_cohorte_ecas'], errors='coerce')
+        df = df[df['año_cohorte_ecas'] == anio_n]
 
-    df_filtrado['institucion_destino'] = df_filtrado['institucion_destino'].apply(parse_list_or_empty)
+    df['institucion_destino'] = df['institucion_destino'].apply(split_pipe_column)
 
-    df_exploded = df_filtrado.explode('institucion_destino').copy()
-    
-    df_exploded.dropna(subset=['institucion_destino'], inplace=True)
+    df_exploded = df.explode('institucion_destino')
     df_exploded = df_exploded[df_exploded['institucion_destino'] != '']
-    
-    df_conteo = df_exploded.groupby('institucion_destino')['mrun'].nunique().reset_index()
-    df_conteo.rename(columns={'mrun': 'estudiantes_recibidos'}, inplace=True)
-    
-    df_top = df_conteo.sort_values(
-        by='estudiantes_recibidos', 
-        ascending=False
-    ).head(top_n)
-    
-    df_top.reset_index(drop=True, inplace=True)
-    df_top.index = df_top.index + 1
-    df_top.index.name = 'Ranking'
 
-    return df_top
+    df_conteo = (
+        df_exploded
+        .groupby('institucion_destino')['mrun']
+        .nunique()
+        .reset_index(name='estudiantes_recibidos')
+        .sort_values('estudiantes_recibidos', ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+
+    df_conteo.index += 1
+    df_conteo.index.name = 'Ranking'
+
+    return df_conteo
 
 #KPI para calcular las carreras a las que se fueron los estudiantes que abandonaron.
 def get_top_fuga_a_carrera(top_n: int = 10, anio_n: Optional[int] = None):
-    
+
     df = pd.read_excel(FILE_DESTINO)
 
-    df_filtrado = df.copy()
-
     if anio_n is not None:
-        df_filtrado['año_cohorte_ecas'] = pd.to_numeric(df_filtrado['año_cohorte_ecas'], errors='coerce').fillna(-1)
-        df_filtrado = df_filtrado[df_filtrado['año_cohorte_ecas'] == anio_n].copy()
-    
-    def parse_list_or_empty(x):
-        if isinstance(x, str):
-            try:
-                import ast
-                return ast.literal_eval(x)
-            except (ValueError, SyntaxError):
-                return []
-        return x if isinstance(x, list) else []
+        df['año_cohorte_ecas'] = pd.to_numeric(
+            df['año_cohorte_ecas'],
+            errors='coerce'
+        )
+        df = df[df['año_cohorte_ecas'] == anio_n]
 
-    df_filtrado['carrera_destino'] = df_filtrado['carrera_destino'].apply(parse_list_or_empty)
+    # 👉 NUEVO PARSEO (formato " | ")
+    df['carrera_destino'] = df['carrera_destino'].apply(
+        lambda x: [i.strip() for i in x.split('|')] if isinstance(x, str) else []
+    )
 
-    df_exploded = df_filtrado.explode('carrera_destino').copy()
-    
-    df_exploded.dropna(subset=['carrera_destino'], inplace=True)
+    df_exploded = df.explode('carrera_destino')
     df_exploded = df_exploded[df_exploded['carrera_destino'] != '']
-    
-    df_conteo = df_exploded.groupby('carrera_destino')['mrun'].nunique().reset_index()
-    df_conteo.rename(columns={'mrun': 'estudiantes_recibidos'}, inplace=True)
-    
-    df_top = df_conteo.sort_values(
-        by='estudiantes_recibidos', 
-        ascending=False
-    ).head(top_n)
-    
-    df_top.reset_index(drop=True, inplace=True)
-    df_top.index = df_top.index + 1
-    df_top.index.name = 'Ranking'
 
-    return df_top
+    if df_exploded.empty:
+        return pd.DataFrame()
+
+    df_conteo = (
+        df_exploded
+        .groupby('carrera_destino')['mrun']
+        .nunique()
+        .reset_index(name='estudiantes_recibidos')
+        .sort_values('estudiantes_recibidos', ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+
+    df_conteo.index += 1
+    df_conteo.index.name = 'Ranking'
+
+    return df_conteo
 
 #KPI para calcular las areas a las que se fueron los estudiantes que abandonaron.
 def get_top_fuga_a_area(top_n: int = 10, anio_n: Optional[int] = None):
+
     df = pd.read_excel(FILE_DESTINO)
 
-    df_filtrado = df.copy()
-
     if anio_n is not None:
-        df_filtrado['año_cohorte_ecas'] = pd.to_numeric(df_filtrado['año_cohorte_ecas'], errors='coerce').fillna(-1)
-        df_filtrado = df_filtrado[df_filtrado['año_cohorte_ecas'] == anio_n].copy()
-    
-    def parse_list_or_empty(x):
-        if isinstance(x, str):
-            try:
-                import ast
-                return ast.literal_eval(x)
-            except (ValueError, SyntaxError):
-                return []
-        return x if isinstance(x, list) else []
+        df['año_cohorte_ecas'] = pd.to_numeric(df['año_cohorte_ecas'], errors='coerce')
+        df = df[df['año_cohorte_ecas'] == anio_n]
 
-    df_filtrado['area_conocimiento_destino'] = df_filtrado['area_conocimiento_destino'].apply(parse_list_or_empty)
+    df['area_conocimiento_destino'] = df['area_conocimiento_destino'].apply(split_pipe_column)
 
-    df_exploded = df_filtrado.explode('area_conocimiento_destino').copy()
-    
-    df_exploded.dropna(subset=['area_conocimiento_destino'], inplace=True)
+    df_exploded = df.explode('area_conocimiento_destino')
     df_exploded = df_exploded[df_exploded['area_conocimiento_destino'] != '']
-    
-    df_conteo = df_exploded.groupby('area_conocimiento_destino')['mrun'].nunique().reset_index()
-    df_conteo.rename(columns={'mrun': 'estudiantes_recibidos'}, inplace=True)
-    
-    df_top = df_conteo.sort_values(
-        by='estudiantes_recibidos', 
-        ascending=False
-    ).head(top_n)
-    
-    df_top.reset_index(drop=True, inplace=True)
-    df_top.index = df_top.index + 1
-    df_top.index.name = 'Ranking'
 
-    return df_top
+    df_conteo = (
+        df_exploded
+        .groupby('area_conocimiento_destino')['mrun']
+        .nunique()
+        .reset_index(name='estudiantes_recibidos')
+        .sort_values('estudiantes_recibidos', ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+
+    df_conteo.index += 1
+    df_conteo.index.name = 'Ranking'
+
+    return df_conteo
 
 #KPI para calcular una estimación de la titulación de los estudiantes que abandonaron.
 def get_estimation_titulacion_abandono(anio_n: Optional[int] = None):
@@ -206,91 +186,95 @@ def get_tiempo_de_descanso(anio_n: Optional[int] = None):
 
     df = pd.read_excel(FILE_DESTINO)
 
-    def parse_list_or_empty(x):
-        if isinstance(x, str):
-            try:
-                # Usar ast.literal_eval es seguro para evaluar strings de Python
-                return ast.literal_eval(x)
-            except (ValueError, SyntaxError):
-                return []
-        return x if isinstance(x, list) else []
+    # ---------- Parseo formato estándar " | " ----------
+    df['anio_ingreso_destino'] = df['anio_ingreso_destino'].apply(
+        lambda x: [int(i.strip()) for i in x.split('|')]
+        if isinstance(x, str) else []
+    )
 
-    df['anio_ingreso_destino'] = df['anio_ingreso_destino'].apply(parse_list_or_empty)
+    df['año_cohorte_ecas'] = pd.to_numeric(df['año_cohorte_ecas'], errors='coerce')
+    df['año_primer_fuga'] = pd.to_numeric(df['año_primer_fuga'], errors='coerce')
 
-    df['año_cohorte_ecas'] = pd.to_numeric(df['año_cohorte_ecas'], errors='coerce').fillna(-1)
+    df = df[
+        (df['año_cohorte_ecas'] >= 2007) &
+        (df['año_cohorte_ecas'] <= 2025)
+    ]
 
-    df_base_filtrada = df[
-        (df['año_cohorte_ecas'] >= 2007) & (df['año_cohorte_ecas'] <= 2025)
-    ].copy()
-    
-    df = df_base_filtrada # Usamos este DataFrame como la nueva base para el resto de la función
-    
-    df_filtrado_cohorte = df.copy()
-    
     if anio_n is not None:
-        # Solo filtra si anio_n tiene un valor
-        df_filtrado_cohorte = df_filtrado_cohorte[df_filtrado_cohorte['año_cohorte_ecas'] == anio_n].copy()
-    
-    df = df_filtrado_cohorte
-    
+        df = df[df['año_cohorte_ecas'] == anio_n]
+
     if df.empty:
-        print("Advertencia: No hay datos de estudiantes para el filtro especificado.")
         return pd.DataFrame()
 
-    df['primer_ingreso_destino'] = df['anio_ingreso_destino'].apply(lambda x: x[0] if x and isinstance(x, list) else np.nan)
-    
-    df['año_primer_fuga'] = pd.to_numeric(df['año_primer_fuga'], errors='coerce')
-    df['primer_ingreso_destino'] = pd.to_numeric(df['primer_ingreso_destino'], errors='coerce')
+    # ---------- Primer reingreso ----------
+    df['primer_ingreso_destino'] = df['anio_ingreso_destino'].apply(
+        lambda x: min(x) if x else np.nan
+    )
 
-    df.dropna(subset=['primer_ingreso_destino'], inplace=True)
+    df = df.dropna(subset=['primer_ingreso_destino', 'año_primer_fuga'])
 
     df['tiempo_de_descanso'] = df['primer_ingreso_destino'] - df['año_primer_fuga']
-    
-    bins = [-np.inf, 0, 1, 2, 5, 10, np.inf] # 7 bordes
-    labels = ['Reingreso Inmediato/Antes (<=0)', '1 año', '2 años', '3 a 5 años', '6 a 10 años', '+10 años'] # 6 etiquetas
-    
-    df['rango_descanso'] = pd.cut(df['tiempo_de_descanso'], bins=bins, labels=labels, right=True)
-    
-    # 5b. Agrupar por Cohorte y Rango para contar MRUNs únicos
-    df_conteo = df.groupby(['rango_descanso', 'año_cohorte_ecas'], observed=True)['mrun'].nunique().reset_index()
-    df_conteo.rename(columns={'mrun': 'conteo_mruns'}, inplace=True)
 
-    # 5c. Calcular el total de desertores por cohorte (para obtener el porcentaje base)
-    total_por_cohorte = df.groupby('año_cohorte_ecas', observed=True)['mrun'].nunique().reset_index()
-    total_por_cohorte.rename(columns={'mrun': 'total_desertores_cohorte'}, inplace=True)
-    
-    # 5d. Unir y calcular el porcentaje
-    df_final = pd.merge(df_conteo, total_por_cohorte, on='año_cohorte_ecas', how='left')
-    df_final['porcentaje'] = (df_final['conteo_mruns'] / df_final['total_desertores_cohorte']) * 100
-    
-    # 5e. Formato final: Pivotar (para el reporte) y añadir el total general
-    df_pivot_cohorte = df_final.pivot_table(
-        index='rango_descanso',
+    # ---------- Rangos ----------
+    bins = [-np.inf, 0, 1, 2, 5, 10, np.inf]
+    labels = [
+        'Reingreso Inmediato/Antes (<=0)',
+        '1 año',
+        '2 años',
+        '3 a 5 años',
+        '6 a 10 años',
+        '+10 años'
+    ]
+
+    df['Rango_de_Descanso'] = pd.cut(
+        df['tiempo_de_descanso'],
+        bins=bins,
+        labels=labels
+    )
+
+    # ---------- Por cohorte ----------
+    conteo = (
+        df.groupby(['Rango_de_Descanso', 'año_cohorte_ecas'], observed=False)['mrun']
+          .nunique()
+          .reset_index(name='conteo')
+    )
+
+    total_cohorte = (
+        df.groupby('año_cohorte_ecas', observed=False)['mrun']
+          .nunique()
+          .reset_index(name='total')
+    )
+
+    df_merge = conteo.merge(total_cohorte, on='año_cohorte_ecas')
+    df_merge['porcentaje'] = (df_merge['conteo'] / df_merge['total']) * 100
+
+    df_pivot = df_merge.pivot_table(
+        index='Rango_de_Descanso',
         columns='año_cohorte_ecas',
         values='porcentaje',
         fill_value=0,
-        observed=True
+        observed=False
     )
-    
-    # 5f. Calcular el Porcentaje Total General (Base: todos los desertores con destino)
-    total_general_mruns = df['mrun'].nunique()
-    df_conteo_total = df.groupby('rango_descanso', observed=True)['mrun'].nunique().reset_index()
-    df_conteo_total['porcentaje'] = (df_conteo_total['mrun'] / total_general_mruns) * 100
-    df_conteo_total.rename(columns={'porcentaje': 'TOTAL GENERAL'}, inplace=True)
-    
-    # Unir el total general al resultado pivotado
-    df_pivot_final = pd.merge(
-        df_pivot_cohorte.reset_index(),
-        df_conteo_total[['rango_descanso', 'TOTAL GENERAL']],
-        on='rango_descanso',
-        how='left'
+
+    # ---------- TOTAL GENERAL ----------
+    total_general = df['mrun'].nunique()
+
+    df_total = (
+        df.groupby('Rango_de_Descanso', observed=False)['mrun']
+          .nunique()
+          .reset_index(name='TOTAL GENERAL')
     )
-    df_pivot_final.set_index('rango_descanso', inplace=True)
-    
-    # Limpieza de nombres de columnas
-    df_pivot_final.columns = [int(col) if isinstance(col, float) else col for col in df_pivot_final.columns]
-    
-    return df_pivot_final.sort_index()
+
+    df_total['TOTAL GENERAL'] = (df_total['TOTAL GENERAL'] / total_general) * 100
+
+    # ---------- Resultado final ----------
+    df_final = (
+        df_pivot
+        .merge(df_total, on='Rango_de_Descanso', how='left')
+        .reset_index()
+    )
+
+    return df_final
 
 def get_total_fugados_por_cohorte(anio_n: Optional[int] = None) -> pd.DataFrame:
     

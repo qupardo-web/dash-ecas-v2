@@ -317,52 +317,79 @@ def get_continuidad_per_year(db_conn, anio_n=None):
     return df
 
 def agrupar_trayectoria_por_carrera(df_destino, df_fugas):
-    """
-    Agrupa los registros de matrícula en la institución de destino por carrera
-    y lo fusiona con la metadata de la fuga.
-    """
-    
-    # 1. Preparar la base de datos de fuga (cohorte y anio_fuga)
+
+    # 1. Base de metadata de fuga
     df_base = df_fugas[['mrun', 'cohorte', 'anio_fuga', 'jornada']].drop_duplicates()
-    df_base.rename(columns={'cohorte': 'año_cohorte_ecas', 'anio_fuga': 'año_primer_fuga'}, inplace=True)
-
-    # 2. Agrupación por carrera de destino (para consolidar años de matrícula)
-    df_agrupado = df_destino.groupby(['mrun', 'institucion_destino', 'carrera_destino']).agg(
-        anio_ingreso_destino=('anio_matricula_destino', 'min'),
-        anio_ultimo_matricula=('anio_matricula_destino', 'max'),
-        area_conocimiento_destino=('area_conocimiento_destino', 'first'),
-        duracion_total_carrera=('duracion_total_carrera', 'first'),
-        nivel_global=('nivel_global', 'first'), 
-        nivel_carrera_1=('nivel_carrera_1', 'first'),
-        nivel_carrera_2=('nivel_carrera_2', 'first'),
-        tipo_inst_1=('tipo_inst_1', 'first'),
-        tipo_inst_2=('tipo_inst_2', 'first'),
-        tipo_inst_3=('tipo_inst_3', 'first'),
-        requisito_ingreso=('requisito_ingreso', 'first')
-    ).reset_index()
-
-    columnas_a_listar = [
-        'anio_ingreso_destino', 'anio_ultimo_matricula', 'institucion_destino', 
-        'carrera_destino', 'area_conocimiento_destino', 'duracion_total_carrera',
-        'nivel_global', 'nivel_carrera_1', 'nivel_carrera_2', 'tipo_inst_1', 
-        'tipo_inst_2', 'tipo_inst_3', 'requisito_ingreso'
-    ]
-    
-    agg_dict = {col: list for col in columnas_a_listar}
-    
-    df_final_estructurado = df_agrupado.groupby('mrun').agg(agg_dict).reset_index()
-
-    # 4. Incorporar la información de trayectoria al df_base (sin cambios)
-    df_salida = pd.merge(
-        df_base, 
-        df_final_estructurado,
-        on='mrun', 
-        how='inner' 
+    df_base.rename(
+        columns={
+            'cohorte': 'año_cohorte_ecas',
+            'anio_fuga': 'año_primer_fuga'
+        },
+        inplace=True
     )
 
-    # 5. Rellenar los NaN con listas vacías (actualizado con las nuevas columnas)
-    for col in columnas_a_listar:
-        df_salida[col] = df_salida[col].apply(lambda x: x if isinstance(x, list) and x is not None else [])
+    # 2. Reconstruir ingreso y último año por carrera / institución
+    df_por_carrera = (
+        df_destino
+        .groupby(
+            ['mrun', 'institucion_destino', 'carrera_destino'],
+            as_index=False
+        )
+        .agg(
+            anio_ingreso_destino=('anio_matricula_destino', 'min'),
+            anio_ultimo_matricula=('anio_matricula_destino', 'max'),
+            area_conocimiento_destino=('area_conocimiento_destino', 'first'),
+            duracion_total_carrera=('duracion_total_carrera', 'first'),
+            nivel_global=('nivel_global', 'first'),
+            nivel_carrera_1=('nivel_carrera_1', 'first'),
+            nivel_carrera_2=('nivel_carrera_2', 'first'),
+            tipo_inst_1=('tipo_inst_1', 'first'),
+            tipo_inst_2=('tipo_inst_2', 'first'),
+            tipo_inst_3=('tipo_inst_3', 'first'),
+            requisito_ingreso=('requisito_ingreso', 'first')
+        )
+    )
+
+    # 3. Orden cronológico real de la trayectoria
+    df_por_carrera = df_por_carrera.sort_values(
+        by=['mrun', 'anio_ingreso_destino']
+    )
+
+    # 4. Columnas a serializar
+    columnas_trayectoria = [
+        'anio_ingreso_destino',
+        'anio_ultimo_matricula',
+        'institucion_destino',
+        'carrera_destino',
+        'area_conocimiento_destino',
+        'duracion_total_carrera',
+        'nivel_global',
+        'nivel_carrera_1',
+        'nivel_carrera_2',
+        'tipo_inst_1',
+        'tipo_inst_2',
+        'tipo_inst_3',
+        'requisito_ingreso'
+    ]
+
+    def serializar(col):
+        return ' | '.join(col.astype(str))
+
+    # 5. Serializar trayectoria por MRUN
+    df_trayectoria = (
+        df_por_carrera
+        .groupby('mrun')
+        .agg({col: serializar for col in columnas_trayectoria})
+        .reset_index()
+    )
+
+    # 6. Merge final
+    df_salida = pd.merge(
+        df_base,
+        df_trayectoria,
+        on='mrun',
+        how='inner'
+    )
 
     return df_salida
 
@@ -373,15 +400,16 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tu
     # 1. Identificación de estudiantes en ECAS
     sql_base_ecas = f"""
     SELECT 
-        mrun,
-        cat_periodo,
-        anio_ing_carr_ori AS cohorte,
-        cod_inst,
-        jornada, 
-        nomb_carrera 
+    mrun,
+    cat_periodo,
+    anio_ing_carr_ori AS cohorte,
+    cod_inst,
+    jornada, 
+    nomb_carrera 
     FROM vista_matricula_unificada
     WHERE mrun IS NOT NULL 
-    AND cod_inst = 104 
+    AND cod_inst = 104
+    AND anio_ing_carr_ori BETWEEN 2007 AND 2025
     {filtro_cohorte}
     ORDER BY mrun, cat_periodo;
     """
@@ -392,7 +420,11 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tu
         print("No se encontraron datos de matrículas para la cohorte especificada en ECAS.")
         return pd.DataFrame(), pd.DataFrame()
 
-    cohortes_iniciales = df_ecas_cohortes[['mrun', 'cohorte']].drop_duplicates()
+    cohortes_iniciales = (
+    df_ecas_cohortes
+    .groupby('mrun', as_index=False)
+    .agg(cohorte=('cohorte', 'min'))
+    )
     cohortes_iniciales.dropna(subset=['cohorte'], inplace=True)
     
     if cohortes_iniciales.empty:
@@ -555,6 +587,8 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tu
         db_conn.execute("DROP TABLE #TempMrunsFuga;")
     except Exception:
         pass 
+
+    
         
     return df_destino_agrupado, df_abandono_total
 
@@ -580,5 +614,5 @@ def exportar_fuga_a_excel(df_destino_agrupado, df_abandono_total, anio_n):
     if df_destino_agrupado.empty and df_abandono_total.empty:
         print("No se generaron archivos de salida.")
 
-#df_fuga_destino, df_abandono = get_fuga_multianual_trayectoria(db_conn, anio_n=None)
-#exportar_fuga_a_excel(df_fuga_destino, df_abandono, anio_n=None)
+#df_destino, df_abandono = get_fuga_multianual_trayectoria(db_conn, anio_n=None)
+#exportar_excel = exportar_fuga_a_excel(df_destino, df_abandono, anio_n=None)
