@@ -9,55 +9,63 @@ db_conn = get_db_engine()
 FILE_DESTINO = "fuga_a_destino_todas_cohortes.xlsx"
 FILE_ABANDONO = "abandono_total_todas_cohortes.xlsx"
 
-#Funciones auxiliares
 def split_pipe_column(x):
     if isinstance(x, str):
-        return [i.strip() for i in x.split('|') if i.strip()]
+        return [p.strip() for p in x.split("|") if p.strip() != ""]
     return []
 
-def get_primer_destino_df(anio_n: Optional[int] = None) -> pd.DataFrame:
-    df = pd.read_excel(FILE_DESTINO)
+#Funciones auxiliares
+def normalizar_trayectoria_destino(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
 
-    # Filtro por cohorte ECAS
-    if anio_n is not None:
-        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
-        df = df[df["año_cohorte_ecas"] == anio_n]
-
-    # Parseo columnas con |
-    df["institucion_destino"] = df["institucion_destino"].apply(split_pipe_column)
-    df["carrera_destino"] = df["carrera_destino"].apply(split_pipe_column)
-    df["area_conocimiento_destino"] = df["area_conocimiento_destino"].apply(split_pipe_column)
-    df["anio_ingreso_destino"] = df["anio_ingreso_destino"].apply(split_pipe_column)
-
-    # Explode sincronizado
-    df = df.explode([
+    columnas_pipe = [
         "institucion_destino",
         "carrera_destino",
         "area_conocimiento_destino",
         "anio_ingreso_destino"
-    ])
+    ]
 
-    # Limpieza
-    df = df[df["institucion_destino"] != ""]
-    df["anio_ingreso_destino"] = pd.to_numeric(df["anio_ingreso_destino"], errors="coerce")
+    for col in columnas_pipe:
+        df[col] = df[col].apply(split_pipe_column)
 
-    # 👉 CLAVE: quedarse con el PRIMER destino por estudiante
-    df = (
-        df
-        .sort_values(["mrun", "anio_ingreso_destino"])
-        .groupby("mrun", as_index=False)
-        .first()
+    df = df.explode(columnas_pipe)
+
+    df["anio_ingreso_destino"] = pd.to_numeric(
+        df["anio_ingreso_destino"], errors="coerce"
     )
+
+    df = df.dropna(subset=["anio_ingreso_destino"])
+    df = df[df["institucion_destino"] != ""]
+
+    return df
+
+def construir_secuencia_destino(df: pd.DataFrame) -> pd.DataFrame:
+    df = (
+        df.sort_values(["mrun", "anio_ingreso_destino"])
+          .assign(orden_destino=lambda x: x.groupby("mrun").cumcount() + 1)
+    )
+    return df
+
+def get_destinos_ecas(anio_n: Optional[int] = None) -> pd.DataFrame:
+    df = pd.read_excel(FILE_DESTINO)
+
+    if anio_n is not None:
+        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
+        df = df[df["año_cohorte_ecas"] == anio_n]
+
+    df = normalizar_trayectoria_destino(df)
+    df = construir_secuencia_destino(df)
 
     return df
 
 #KPI para calcular las instituciones a las que se fueron los estudiantes que abandonaron.
-def get_top_fuga_a_destino(top_n: int = 10, anio_n: Optional[int] = None):
+def get_top_fuga_a_destino(top_n=10, anio_n=None, orden=1):
+    df = get_destinos_ecas(anio_n)
 
-    df = get_primer_destino_df(anio_n)
+    df_orden = df[df["orden_destino"] == orden]
 
-    df_conteo = (
-        df
+    out = (
+        df_orden
         .groupby("institucion_destino")["mrun"]
         .nunique()
         .reset_index(name="estudiantes_recibidos")
@@ -66,11 +74,16 @@ def get_top_fuga_a_destino(top_n: int = 10, anio_n: Optional[int] = None):
         .reset_index(drop=True)
     )
 
-    df_conteo.index += 1
-    df_conteo.index.name = "Ranking"
+    out.index += 1
+    out.index.name = "Ranking"
 
-    return df_conteo
+    return out
 
+print(get_top_fuga_a_destino(10, orden=1))
+# Segunda institución
+print(get_top_fuga_a_destino(10, orden=2))
+# Tercera institución
+print(get_top_fuga_a_destino(10, orden=3))
 #KPI para calcular las carreras a las que se fueron los estudiantes que abandonaron.
 def get_top_fuga_a_carrera(top_n: int = 10, anio_n: Optional[int] = None):
 

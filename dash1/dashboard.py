@@ -33,6 +33,7 @@ df_total_fugados_data = get_total_fugados_por_cohorte(anio_n=None)
 df_titulacion_estimada_data = get_estimation_titulacion_abandono(anio_n=None)
 df_titulados_desde_otra_inst = titulados_en_ecas_desde_otra_institucion(DB_ENGINE)
 df_desercion_data = get_tasa_desercion_por_cohorte()
+df_ingresos_competencia = get_ingresos_competencia_ecas(DB_ENGINE)
 
 #Creación de gráficos
 admission_chart = create_admission_chart(df_ingresos)
@@ -49,7 +50,19 @@ total_fugados_chart_initial = create_total_fugados_chart(df_total_fugados_data, 
 titulacion_estimada_chart_initial = create_titulacion_estimada_chart(df_titulacion_estimada_data, anio_n=None)
 titulados_desde_otra_inst_chart_initial = create_titulacion_desde_otra_inst_chart(df_titulados_desde_otra_inst)
 desercion_chart_initial = create_tasa_desercion_chart(df_desercion_data, anio_n=None)
+ingresos_competencia_chart = create_ingresos_competencia_chart(df_ingresos_competencia)
 
+#Dropdown instituciones
+opciones_inst = (
+    df_ingresos_competencia[["cod_inst", "nomb_inst"]]
+    .drop_duplicates()
+    .sort_values("nomb_inst")
+)
+
+dropdown_instituciones = [
+    {"label": row["nomb_inst"], "value": row["cod_inst"]}
+    for _, row in opciones_inst.iterrows()
+]
 
 cohortes_disponibles = sorted(df_ingresos['ingreso_primero'].unique().tolist())
 
@@ -85,6 +98,17 @@ app.layout = html.Div(style={'backgroundColor': '#f8f9fa', 'padding': '20px'}, c
                 )
             ])
         ])
+    ]),
+
+    html.Div(className="row", children=[
+
+        html.Div(className="col-md-8", children=[
+            dcc.Graph(
+                id="ingresos-competencia-chart",
+                figure=ingresos_competencia_chart
+            )
+        ])
+
     ]),
     
     html.Br(),
@@ -337,6 +361,16 @@ app.layout = html.Div(style={'backgroundColor': '#f8f9fa', 'padding': '20px'}, c
     ]),
 
 ])
+
+@app.callback(
+    Output("ingresos-competencia-chart", "figure"),
+    Input("institucion-dropdown", "value")
+)
+def update_ingresos_competencia(cod_inst_selected):
+    return create_ingresos_competencia_chart(
+        df_ingresos_competencia,
+        cod_inst_selected
+    )
 
 @app.callback(
     Output('permanencia-diurna-chart', 'figure'),

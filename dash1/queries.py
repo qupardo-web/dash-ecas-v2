@@ -37,6 +37,65 @@ def get_mruns_per_year(db_conn, anio_n = None):
 
     return df_total_mruns
 
+def get_ingresos_competencia_ecas(db_conn) -> pd.DataFrame:
+    """
+    Obtiene los ingresos por cohorte para ECAS y su competencia directa (IP + CFT),
+    y deja listo el dataset para seleccionar Top 10 instituciones por promedio.
+    """
+
+    sql_query = """
+    WITH base AS (
+    SELECT
+        v.anio_ing_carr_ori AS cohorte,
+        v.cod_inst,
+        v.nomb_inst,
+        COUNT(DISTINCT v.mrun) AS total_ingresos
+    FROM vista_matricula_unificada v
+    WHERE v.mrun IS NOT NULL
+      AND v.anio_ing_carr_ori BETWEEN 2007 AND 2025
+      AND v.nomb_carrera LIKE '%AUDITOR%'
+      AND v.region_sede = 'Metropolitana'
+      AND (
+            v.cod_inst = 104
+            OR v.tipo_inst_1 IN ('Institutos Profesionales', 'Centros de Formación Técnica')
+      )
+    GROUP BY
+        v.anio_ing_carr_ori,
+        v.cod_inst,
+        v.nomb_inst
+    ),
+
+    ranking AS (
+        SELECT
+            cod_inst,
+            nomb_inst,
+            AVG(total_ingresos) AS promedio_ingresos
+        FROM base
+        GROUP BY cod_inst, nomb_inst
+    ),
+
+    top10 AS (
+        SELECT TOP (10)
+            cod_inst
+        FROM ranking
+        ORDER BY promedio_ingresos DESC
+    )
+
+    SELECT
+        b.cohorte,
+        b.cod_inst,
+        b.nomb_inst,
+        b.total_ingresos
+    FROM base b
+    JOIN top10 t
+        ON b.cod_inst = t.cod_inst
+    ORDER BY
+        b.cohorte,
+        b.total_ingresos DESC;
+    """
+
+    return pd.read_sql(sql_query, db_conn)
+
 def get_permanencia_per_year(db_conn, anio_n: Optional[int] = None) -> pd.DataFrame:
     
     # El filtro 'anio_n' se aplica a la cohorte

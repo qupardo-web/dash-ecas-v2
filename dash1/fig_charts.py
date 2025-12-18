@@ -868,3 +868,65 @@ def create_tasa_desercion_chart(df: pd.DataFrame, anio_n: Optional[int] = None) 
     )
 
     return fig
+
+def create_ingresos_competencia_chart(df: pd.DataFrame) -> go.Figure:
+    """
+    Gráfico de líneas de ingresos por cohorte.
+    Por defecto muestra SOLO ECAS.
+    Las demás instituciones se activan desde la leyenda.
+    """
+
+    if df.empty:
+        return go.Figure()
+
+    total_general = df["total_ingresos"].sum()
+
+    fig = px.line(
+        df,
+        x="cohorte",
+        y="total_ingresos",
+        color="nomb_inst",
+        markers=True,
+        title=(
+            "Ingreso de Alumnos a Auditoría – ECAS vs Competencia (Top 10)<br>"
+            f"<sup>Total general: {total_general:,.0f} alumnos</sup>"
+        ),
+        labels={
+            "cohorte": "Año de Ingreso (Cohorte)",
+            "total_ingresos": "Número de Estudiantes",
+            "nomb_inst": "Institución"
+        },
+        template="plotly_white"
+    )
+
+    # 🔑 Mostrar SOLO ECAS por defecto
+    fig.for_each_trace(
+        lambda t: t.update(
+            visible=True if t.name == "ECAS" else "legendonly",
+            line=dict(width=4 if t.name == "ECAS" else 2),
+            opacity=1.0 if t.name == "ECAS" else 0.75
+        )
+    )
+
+    # Leyenda como selector interactivo
+    fig.update_layout(
+        legend=dict(
+            title="Institución (click para mostrar)",
+            orientation="v",
+            x=1.02,
+            y=1,
+            itemclick="toggle",
+            itemdoubleclick="toggleothers"
+        ),
+        xaxis=dict(type="category")
+    )
+
+    fig.update_traces(
+        hovertemplate=(
+            "<b>Institución:</b> %{legendgroup}<br>"
+            "<b>Cohorte:</b> %{x}<br>"
+            "<b>Ingresos:</b> %{y:,.0f} estudiantes<extra></extra>"
+        )
+    )
+
+    return fig
