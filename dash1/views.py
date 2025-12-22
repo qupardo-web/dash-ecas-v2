@@ -105,7 +105,9 @@ def create_derived_view(view_name: str, select_sql: str):
 
 consulta_matricula = """ 
             CAST(cat_periodo AS INT) AS cat_periodo, 
-            CAST(mrun AS BIGINT) AS mrun, 
+            CAST(mrun AS BIGINT) AS mrun,
+            gen_alu,
+            rango_edad,
             nomb_inst,
             area_conocimiento,
             codigo_unico,
@@ -123,8 +125,6 @@ consulta_matricula = """
             tipo_inst_2,
             tipo_inst_3,
             fec_nac_alu,
-            gen_alu,
-            rango_edad,
             id,
             nivel_global,
             nivel_carrera_1,

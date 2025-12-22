@@ -1,6 +1,7 @@
 #Archivo para calcular metricas en base al excel de trayectoria post titulacion en ECAS.
 import pandas as pd
 from typing import Optional
+from auxiliar import *
 
 FILE_PATH = 'trayectoria_post_ecas.xlsx'
 
@@ -12,223 +13,469 @@ orden_nivel = {
 
 #KPI 1: Nivel de reingreso a la educación superior
 #Evalua si los estudiantes ingresan a un pregrado, postitulo o postgrado tras titularse en ECAS.
-def calcular_nivel_reingreso(cohorte_n: int | None = None):
+#Solo evalua el maximo nivel alcanzado tras titulación en ECAS. 
+def calcular_nivel_reingreso(cohorte_n: int | None = None, jornada: str | None = None):
 
-    df = pd.read_excel(FILE_PATH, sheet_name='Trayectoria_Detallada')
-    df = df[['mrun', 'cohorte', 'nivel_global']].dropna()
+    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+
+    columnas = [
+        "mrun",
+        "año_cohorte_ecas",
+        "año_titulacion_ecas",
+        "anio_ingreso_destino",
+        "nivel_global",
+        "jornada"
+    ]
+
+    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
 
     if cohorte_n is not None:
-        df['cohorte'] = pd.to_numeric(df['cohorte'], errors='coerce')
-        df = df[df['cohorte'] == cohorte_n]
+        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
+        df = df[df["año_cohorte_ecas"] == cohorte_n]
 
-    df['nivel_rank'] = df['nivel_global'].map(orden_nivel)
+    if jornada is not None:
+        df = df[df["jornada"] == jornada]
 
-    df_max = (
-        df.sort_values('nivel_rank')
-          .groupby('mrun', as_index=False)
-          .last()
-    )
+    resultados = []
 
-    total = len(df_max)
+    for _, row in df.iterrows():
+
+        anio_tit = row["año_titulacion_ecas"]
+
+        ingresos = split_pipe_list(row["anio_ingreso_destino"])
+        niveles = split_pipe_list(row["nivel_global"])
+
+        # Seguridad: listas paralelas
+        eventos = zip(ingresos, niveles)
+
+        # Solo eventos posteriores a ECAS
+        niveles_post_ecas = [
+            nivel
+            for anio, nivel in eventos
+            if anio.isdigit() and int(anio) > anio_tit
+        ]
+
+        if not niveles_post_ecas:
+            continue
+
+        # Nivel máximo alcanzado
+        nivel_max = max(
+            niveles_post_ecas,
+            key=lambda n: orden_nivel.get(n, 0)
+        )
+
+        resultados.append({
+            "mrun": row["mrun"],
+            "nivel_global": nivel_max
+        })
+
+    df_max = pd.DataFrame(resultados)
+
+    total = df_max["mrun"].nunique()
 
     conteo = (
-        df_max.groupby('nivel_global')
+        df_max.groupby("nivel_global")
         .size()
-        .rename('cantidad')
+        .rename("cantidad")
         .reset_index()
     )
 
-    conteo['total_reingresan'] = total
-    conteo['porcentaje'] = (conteo['cantidad'] / total * 100).round(2)
+    conteo["total_reingresan"] = total
+    conteo["porcentaje"] = (conteo["cantidad"] / total * 100).round(2)
 
-    return conteo.sort_values('nivel_global')
+    return conteo.sort_values("nivel_global")
 
-# #KPI 2: Tipo de institución de reingreso
-# #Evalua el tipo de institución a la que ingresan los estudiantes tras titularse en ECAS.
-def calcular_tipo_institucion_reingreso(cohorte_n: int | None = None, tipo_seleccionado: str = 'tipo_inst_1'):
+#KPI1.1: Nivel inmediato de reingreso
+#Evalua el nivel al que ingresan los estudiantes inmediatamente después de titularse en ECAS.
+def calcular_nivel_reingreso_inmediato(cohorte_n: int | None = None, jornada: str | None = None):
 
-    df = pd.read_excel(FILE_PATH, sheet_name='Trayectoria_Detallada')
+    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
 
-    df = df[['mrun', 'cohorte', 'nivel_global', tipo_seleccionado]].dropna()
+    columnas = [
+        "mrun",
+        "año_cohorte_ecas",
+        "año_titulacion_ecas",
+        "anio_ingreso_destino",
+        "nivel_global",
+        "jornada"
+    ]
+
+    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
 
     if cohorte_n is not None:
-        df['cohorte'] = pd.to_numeric(df['cohorte'], errors='coerce')
-        df = df[df['cohorte'] == cohorte_n]
+        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
+        df = df[df["año_cohorte_ecas"] == cohorte_n]
 
-    df['nivel_rank'] = df['nivel_global'].map(orden_nivel)
+    if jornada is not None:
+        df = df[df["jornada"] == jornada]
 
-    df_max = (
-        df.sort_values('nivel_rank')
-          .groupby('mrun', as_index=False)
-          .last()
-    )
+    resultados = []
 
-    total = len(df_max)
+    for _, row in df.iterrows():
+        anio_tit = row["año_titulacion_ecas"]
+        ingresos = split_pipe_list(row["anio_ingreso_destino"])
+        niveles = split_pipe_list(row["nivel_global"])
+
+        eventos_post_ecas = [
+            (int(anio), nivel)
+            for anio, nivel in zip(ingresos, niveles)
+            if anio.isdigit() and int(anio) > anio_tit
+        ]
+
+        if not eventos_post_ecas:
+            continue
+
+        anio_min, nivel_inmediato = min(eventos_post_ecas, key=lambda x: x[0])
+        resultados.append({
+            "mrun": row["mrun"],
+            "nivel_global": nivel_inmediato
+        })
+
+    if not resultados:
+        return pd.DataFrame(columns=["nivel_global", "cantidad", "total_reingresan", "porcentaje"])
+
+    df_min = pd.DataFrame(resultados)
+
+    total = df_min["mrun"].nunique()
 
     conteo = (
-        df_max.groupby(tipo_seleccionado)
+        df_min.groupby("nivel_global")
         .size()
-        .rename('cantidad')
+        .rename("cantidad")
         .reset_index()
     )
 
-    conteo['total_reingresan'] = total
-    conteo['porcentaje'] = (conteo['cantidad'] / total * 100).round(2)
+    conteo["total_reingresan"] = total
+    conteo["porcentaje"] = (conteo["cantidad"] / total * 100).round(2)
 
-    return conteo.sort_values('cantidad', ascending=False)
+    return conteo.sort_values("nivel_global")
 
-# #KPI 3: Áreas de conocimiento de reingreso
-# #Evalua las áreas de conocimiento a las que ingresan los estudiantes tras titularse en ECAS.
-def calcular_areas_conocimiento_reingreso(cohorte_n: int | None = None):
+def calcular_top_reingreso_por_columna_titulados(
+    columna_objetivo: str,
+    cohorte_n: int | None = None,
+    jornada: str | None = None,
+    criterio: str = "max",  # "max" o "min"
+    top_n: int | None = None
+):
+    """
+    KPI genérica de reingreso post-ECAS.
+    
+    - columna_objetivo: columna a analizar (ej: 'tipo_institucion_1', 'area_conocimiento_destino')
+    - cohorte_n: cohorte ECAS (opcional)
+    - criterio:
+        - 'max' → nivel máximo alcanzado
+        - 'min' → nivel inmediato post-ECAS
+    - top_n: limitar al top N (opcional)
+    """
 
-    df = pd.read_excel(FILE_PATH, sheet_name='Trayectoria_Detallada')
-    df = df[['mrun', 'cohorte', 'nivel_global', 'area_conocimiento_destino']].dropna()
+    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+
+    columnas = [
+        "mrun",
+        "año_cohorte_ecas",
+        "año_titulacion_ecas",
+        "anio_ingreso_destino",
+        "nivel_global",
+        "jornada",
+        columna_objetivo
+    ]
+
+    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
 
     if cohorte_n is not None:
-        df['cohorte'] = pd.to_numeric(df['cohorte'], errors='coerce')
-        df = df[df['cohorte'] == cohorte_n]
+        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
+        df = df[df["año_cohorte_ecas"] == cohorte_n]
 
-    df['nivel_rank'] = df['nivel_global'].map(orden_nivel)
+    if jornada is not None:
+        df = df[df["jornada"] == jornada]
 
-    df_max = (
-        df.sort_values('nivel_rank')
-          .groupby('mrun', as_index=False)
-          .last()
-    )
+    resultados = []
 
-    total = len(df_max)
+    for _, row in df.iterrows():
+
+        anio_tit = row["año_titulacion_ecas"]
+
+        ingresos = split_pipe_list(row["anio_ingreso_destino"])
+        niveles = split_pipe_list(row["nivel_global"])
+        valores = split_pipe_list(row[columna_objetivo])
+
+        eventos = [
+            (int(anio), nivel, valor)
+            for anio, nivel, valor in zip(ingresos, niveles, valores)
+            if anio.isdigit() and int(anio) > anio_tit
+        ]
+
+        if not eventos:
+            continue
+
+        # Selección según criterio
+        if criterio == "max":
+            _, _, valor_sel = max(
+                eventos,
+                key=lambda x: orden_nivel.get(x[1], 0)
+            )
+        elif criterio == "min":
+            _, _, valor_sel = min(
+                eventos,
+                key=lambda x: x[0]
+            )
+        else:
+            raise ValueError("criterio debe ser 'max' o 'min'")
+
+        resultados.append({
+            "mrun": row["mrun"],
+            columna_objetivo: valor_sel
+        })
+
+    df_res = pd.DataFrame(resultados)
+
+    total = df_res["mrun"].nunique()
 
     conteo = (
-        df_max.groupby('area_conocimiento_destino')
+        df_res.groupby(columna_objetivo)
         .size()
-        .rename('cantidad')
+        .rename("cantidad")
         .reset_index()
     )
 
-    conteo['total_reingresan'] = total
-    conteo['porcentaje'] = (conteo['cantidad'] / total * 100).round(2)
+    conteo["total_reingresan"] = total
+    conteo["porcentaje"] = (conteo["cantidad"] / total * 100).round(2)
 
-    return conteo.sort_values('cantidad', ascending=False)
+    conteo = conteo.sort_values("cantidad", ascending=False)
+
+    if top_n is not None:
+        conteo = conteo.head(top_n)
+
+    return conteo
 
 #KPI 4: Tiempo de demora en acceder a otra carrera tras titularse en ECAS,
 #separado por nivel_global (pregrado, postitulo, postgrado).
-def calcular_tiempo_demora_reingreso(cohorte_n: int | None = None):
-    # Leer datos
-    df = pd.read_excel(FILE_PATH, sheet_name='Trayectoria_Detallada')
+#Evalua el promedio. 
+def calcular_demora_reingreso_por_nivel(
+    cohorte_n: int | None = None
+):
+    """
+    KPI 4:
+    Tiempo de demora (en años) para reingresar a la educación superior
+    tras titularse de ECAS, separado por nivel_global.
+    
+    Cada trayectoria post-ECAS se contabiliza como una observación.
+    """
+
+    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
 
     columnas = [
-        'mrun', 'cohorte', 'nivel_global', 'anio_titulacion', 'anio_matricula_destino'
+        "mrun",
+        "año_cohorte_ecas",
+        "año_titulacion_ecas",
+        "anio_ingreso_destino",
+        "nivel_global"
     ]
-    df = df[columnas].dropna()
 
-    # Filtrar por cohorte si se solicita
+    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
+
     if cohorte_n is not None:
-        df['cohorte'] = pd.to_numeric(df['cohorte'], errors='coerce')
-        df = df[df['cohorte'] == cohorte_n].copy()
+        df["año_cohorte_ecas"] = pd.to_numeric(
+            df["año_cohorte_ecas"], errors="coerce"
+        )
+        df = df[df["año_cohorte_ecas"] == cohorte_n]
 
-    # Asegurar que los años son numéricos
-    df['anio_titulacion'] = pd.to_numeric(df['anio_titulacion'], errors='coerce')
-    df['anio_matricula_destino'] = pd.to_numeric(df['anio_matricula_destino'], errors='coerce')
+    registros = []
 
-    # Eliminar filas con NaN
-    df = df.dropna(subset=['anio_titulacion', 'anio_matricula_destino'])
+    for _, row in df.iterrows():
 
-    # Solo considerar matrículas posteriores a la titulación
-    df = df[df['anio_matricula_destino'] >= df['anio_titulacion']]
+        anio_tit = row["año_titulacion_ecas"]
+        cohorte = row["año_cohorte_ecas"]
 
-    # Eliminar duplicados por mrun (estudiantes) y quedarnos con la primera matrícula posterior
-    df = df.sort_values(by='anio_matricula_destino')  # Ordenamos por año de matrícula (primero el más bajo)
-    df = df.drop_duplicates(subset=['mrun'], keep='first')  # Mantenemos solo la primera matrícula posterior
+        ingresos = split_pipe_list(row["anio_ingreso_destino"])
+        niveles = split_pipe_list(row["nivel_global"])
 
-    # Cálculo de la demora (diferencia entre año de matrícula y año de titulación)
-    df['demora_anios'] = df['anio_matricula_destino'] - df['anio_titulacion']
+        for anio, nivel in zip(ingresos, niveles):
 
-    # Resumen por nivel_global
+            if not anio.isdigit():
+                continue
+
+            anio = int(anio)
+
+            if anio <= anio_tit:
+                continue
+
+            demora = anio - anio_tit
+
+            registros.append({
+                "cohorte": cohorte,
+                "nivel_global": nivel,
+                "demora_anios": demora
+            })
+
+    df_eventos = pd.DataFrame(registros)
+
+    if df_eventos.empty:
+        return df_eventos
+
     resumen = (
-        df.groupby('nivel_global')
-          .agg(
-              cantidad_casos=('demora_anios', 'count'),
-              promedio_demora=('demora_anios', 'mean'),
-              mediana_demora=('demora_anios', 'median'),
-              min_demora=('demora_anios', 'min'),
-              max_demora=('demora_anios', 'max')
-          )
-          .reset_index()
-    )
-
-    resumen[['promedio_demora', 'mediana_demora']] = resumen[
-        ['promedio_demora', 'mediana_demora']
-    ].round(2)
-
-    return resumen.sort_values('nivel_global')
-
-tiempo_demora = calcular_tiempo_demora_reingreso()
-print(tiempo_demora)
-
-# KPI5: En promedio, ¿Cómo se ve la ruta de los titulados de ECAS?
-# Evaluamos los porcentajes de cuantos hacen un pregrado (titulacion) > postítulo > magister > doctorado. 
-def calcular_ruta_promedio_titulados(cohorte_n: Optional[int] = None) -> pd.DataFrame:
-    """
-    KPI 5: Calcula la ruta académica secuencial única (eliminando matrículas repetidas dentro del mismo nivel)
-    que toman los titulados de ECAS después de graduarse.
-    """
-    
-    # 1. Leer datos y pre-filtrar
-    df = pd.read_excel(FILE_PATH, sheet_name='Trayectoria_Detallada')
-    df = df[['mrun', 'cohorte', 'nivel_global', 'anio_matricula_destino']].dropna()
-
-    if cohorte_n is not None:
-        df['cohorte'] = pd.to_numeric(df['cohorte'], errors='coerce')
-        df = df[df['cohorte'] == cohorte_n].copy()
-    
-    # 2. Asignar ranking de nivel y ordenar
-    df['nivel_rank'] = df['nivel_global'].map(orden_nivel)
-    
-    # Asegurar que los años de matrícula sean numéricos para ordenar correctamente
-    df['anio_matricula_destino'] = pd.to_numeric(df['anio_matricula_destino'], errors='coerce')
-    df = df.dropna(subset=['anio_matricula_destino', 'nivel_rank'])
-    
-    # 3. CONSOLIDACIÓN DE NIVELES: Obtener la primera matrícula para cada Nivel Global por MRUN
-    # Ordenamos por año de matrícula destino (cronológico) y luego por rank (ascendente).
-    # Si un estudiante cursa Postgrado en 2020 y 2021, queremos solo el de 2020.
-    # Si cursa dos Postítulos, queremos el primero.
-    df_unico_por_nivel = (
-        df.sort_values(by=['mrun', 'anio_matricula_destino', 'nivel_rank'], ascending=[True, True, True])
-          .drop_duplicates(subset=['mrun', 'nivel_global'], keep='first')
-          .sort_values(by=['mrun', 'anio_matricula_destino']) # Reordenamos por tiempo para la secuencia
-          .copy()
-    )
-    
-    # 4. Crear la ruta secuencial única
-    df_rutas = (
-        df_unico_por_nivel.groupby('mrun')
+        df_eventos
+        .groupby(["cohorte", "nivel_global"])
         .agg(
-            # Concatenamos los niveles posteriores al Pregrado de ECAS
-            niveles_posteriores=('nivel_global', lambda x: ' → '.join(x.tolist()))
+            promedio_demora=("demora_anios", "mean"),
+            mediana_demora=("demora_anios", "median"),
+            minimo_demora=("demora_anios", "min"),
+            maximo_demora=("demora_anios", "max"),
+            cantidad_trayectorias=("demora_anios", "count")
         )
         .reset_index()
     )
-    
-    # 5. Añadir el nivel de titulación de ECAS ("Pregrado") al inicio
-    # Si la lista de niveles posteriores está vacía, la ruta es solo 'Pregrado'.
-    df_rutas['ruta_secuencial'] = df_rutas['niveles_posteriores'].apply(
-        lambda x: 'Pregrado' if x == '' else 'Pregrado → ' + x
-    )
-    
-    # 6. Contar la frecuencia de cada ruta y calcular el porcentaje
-    total_titulados = len(df_rutas)
-    
-    conteo_rutas = (
-        df_rutas.groupby('ruta_secuencial')
+
+    resumen["promedio_demora"] = resumen["promedio_demora"].round(2)
+
+    return resumen.sort_values(["cohorte", "nivel_global"])
+
+#KPI 4.1: Tiempo de demora en acceder a otra carrera tras titularse en ECAS,
+#separado por cantidad
+def calcular_distribucion_demora_reingreso(
+    cohorte_n: int | None = None
+):
+    """
+    KPI 4.b:
+    Distribución del tiempo de demora (en años) para reingresar
+    a la educación superior tras titularse de ECAS.
+
+    Cada trayectoria post-ECAS se contabiliza como una observación.
+    """
+
+    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+
+    columnas = [
+        "mrun",
+        "año_cohorte_ecas",
+        "año_titulacion_ecas",
+        "anio_ingreso_destino",
+        "nivel_global"
+    ]
+
+    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
+
+    if cohorte_n is not None:
+        df["año_cohorte_ecas"] = pd.to_numeric(
+            df["año_cohorte_ecas"], errors="coerce"
+        )
+        df = df[df["año_cohorte_ecas"] == cohorte_n]
+
+    registros = []
+
+    for _, row in df.iterrows():
+
+        anio_tit = row["año_titulacion_ecas"]
+        cohorte = row["año_cohorte_ecas"]
+
+        ingresos = split_pipe_list(row["anio_ingreso_destino"])
+        niveles = split_pipe_list(row["nivel_global"])
+
+        for anio, nivel in zip(ingresos, niveles):
+
+            if not anio.isdigit():
+                continue
+
+            anio = int(anio)
+
+            if anio <= anio_tit:
+                continue
+
+            demora = anio - anio_tit
+
+            registros.append({
+                "cohorte": cohorte,
+                "nivel_global": nivel,
+                "demora_anios": demora
+            })
+
+    df_eventos = pd.DataFrame(registros)
+
+    if df_eventos.empty:
+        return df_eventos
+
+    distribucion = (
+        df_eventos
+        .groupby(["cohorte", "nivel_global", "demora_anios"])
         .size()
-        .rename('cantidad')
+        .rename("cantidad_trayectorias")
+        .reset_index()
+        .sort_values(["cohorte", "nivel_global", "demora_anios"])
+    )
+
+    return distribucion
+
+# KPI5: En promedio, ¿Cómo se ve la ruta de los titulados de ECAS?
+# Evaluamos los porcentajes de cuantos hacen un pregrado (titulacion) > postítulo > magister > doctorado. 
+def calcular_ruta_promedio_titulados(
+    cohorte_n: Optional[int] = None
+) -> pd.DataFrame:
+
+    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+
+    columnas = [
+        "mrun",
+        "año_cohorte_ecas",
+        "año_titulacion_ecas",
+        "anio_ingreso_destino",
+        "nivel_global"
+    ]
+
+    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
+
+    if cohorte_n is not None:
+        df["año_cohorte_ecas"] = pd.to_numeric(
+            df["año_cohorte_ecas"], errors="coerce"
+        )
+        df = df[df["año_cohorte_ecas"] == cohorte_n]
+
+    rutas = []
+
+    for _, row in df.iterrows():
+
+        anio_tit = row["año_titulacion_ecas"]
+
+        ingresos = split_pipe_list(row["anio_ingreso_destino"])
+        niveles = split_pipe_list(row["nivel_global"])
+
+        # Reconstruir eventos post-ECAS
+        eventos = [
+            (int(anio), nivel)
+            for anio, nivel in zip(ingresos, niveles)
+            if anio.isdigit() and int(anio) > anio_tit
+        ]
+
+        if not eventos:
+            ruta = ["Pregrado"]
+        else:
+            # Ordenar cronológicamente
+            eventos.sort(key=lambda x: x[0])
+
+            # Eliminar niveles repetidos (manteniendo orden)
+            niveles_unicos = []
+            for _, nivel in eventos:
+                if not niveles_unicos or niveles_unicos[-1] != nivel:
+                    niveles_unicos.append(nivel)
+
+            ruta = ["Pregrado"] + niveles_unicos
+
+        rutas.append({
+            "mrun": row["mrun"],
+            "ruta_secuencial": " → ".join(ruta)
+        })
+
+    df_rutas = pd.DataFrame(rutas)
+
+    total_titulados = df_rutas["mrun"].nunique()
+
+    conteo = (
+        df_rutas.groupby("ruta_secuencial")
+        .size()
+        .rename("cantidad")
         .reset_index()
     )
-    
-    conteo_rutas['total_titulados'] = total_titulados
-    conteo_rutas['porcentaje'] = (conteo_rutas['cantidad'] / total_titulados * 100).round(2)
-    
-    return conteo_rutas.sort_values('cantidad', ascending=False)
 
-df_conteo = calcular_ruta_promedio_titulados()
-print(df_conteo)
+    conteo["total_titulados"] = total_titulados
+    conteo["porcentaje"] = (conteo["cantidad"] / total_titulados * 100).round(2)
+
+    return conteo.sort_values("cantidad", ascending=False)

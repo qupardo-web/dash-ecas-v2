@@ -14,10 +14,31 @@ def split_pipe_column(x):
         return [p.strip() for p in x.split("|") if p.strip() != ""]
     return []
 
-#Funciones auxiliares
-def normalizar_trayectoria_destino(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
+#Funcion normalizada para calcular KPI de fuga a inst, carr, area, etc. Según columnas de archivo. 
+def get_top_fuga_por_orden(
+    columna: str,
+    orden: int = 1,
+    top_n: int = 10,
+    anio_n: Optional[int] = None
+) -> pd.DataFrame:
+    """
+    KPI genérico para obtener Top N de destinos (institución / carrera / área)
+    según el orden cronológico post-ECAS.
+    
+    orden = 1 → primer destino
+    orden = 2 → segundo destino
+    orden = 3 → tercer destino
+    """
 
+    # 1. Cargar datos base
+    df = pd.read_excel(FILE_DESTINO)
+
+    # 2. Filtro por cohorte
+    if anio_n is not None:
+        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
+        df = df[df["año_cohorte_ecas"] == anio_n]
+
+    # 3. Columnas a normalizar
     columnas_pipe = [
         "institucion_destino",
         "carrera_destino",
@@ -28,6 +49,7 @@ def normalizar_trayectoria_destino(df: pd.DataFrame) -> pd.DataFrame:
     for col in columnas_pipe:
         df[col] = df[col].apply(split_pipe_column)
 
+    # 4. Explode sincronizado
     df = df.explode(columnas_pipe)
 
     df["anio_ingreso_destino"] = pd.to_numeric(
@@ -35,83 +57,26 @@ def normalizar_trayectoria_destino(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     df = df.dropna(subset=["anio_ingreso_destino"])
-    df = df[df["institucion_destino"] != ""]
+    df = df[df[columna] != ""]
 
-    return df
+    # 5. Orden cronológico real
+    df = df.sort_values(["mrun", "anio_ingreso_destino"])
 
-def construir_secuencia_destino(df: pd.DataFrame) -> pd.DataFrame:
-    df = (
-        df.sort_values(["mrun", "anio_ingreso_destino"])
-          .assign(orden_destino=lambda x: x.groupby("mrun").cumcount() + 1)
+    # 6. Obtener destino N por estudiante
+    df_orden = (
+        df
+        .groupby("mrun")
+        .nth(orden - 1)  # orden humano → índice Python
+        .reset_index()
     )
-    return df
 
-def get_destinos_ecas(anio_n: Optional[int] = None) -> pd.DataFrame:
-    df = pd.read_excel(FILE_DESTINO)
+    if df_orden.empty:
+        return pd.DataFrame()
 
-    if anio_n is not None:
-        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
-        df = df[df["año_cohorte_ecas"] == anio_n]
-
-    df = normalizar_trayectoria_destino(df)
-    df = construir_secuencia_destino(df)
-
-    return df
-
-#KPI para calcular las instituciones a las que se fueron los estudiantes que abandonaron.
-def get_top_fuga_a_destino(top_n=10, anio_n=None, orden=1):
-    df = get_destinos_ecas(anio_n)
-
-    df_orden = df[df["orden_destino"] == orden]
-
-    out = (
+    # 7. Conteo
+    df_conteo = (
         df_orden
-        .groupby("institucion_destino")["mrun"]
-        .nunique()
-        .reset_index(name="estudiantes_recibidos")
-        .sort_values("estudiantes_recibidos", ascending=False)
-        .head(top_n)
-        .reset_index(drop=True)
-    )
-
-    out.index += 1
-    out.index.name = "Ranking"
-
-    return out
-
-print(get_top_fuga_a_destino(10, orden=1))
-# Segunda institución
-print(get_top_fuga_a_destino(10, orden=2))
-# Tercera institución
-print(get_top_fuga_a_destino(10, orden=3))
-#KPI para calcular las carreras a las que se fueron los estudiantes que abandonaron.
-def get_top_fuga_a_carrera(top_n: int = 10, anio_n: Optional[int] = None):
-
-    df = get_primer_destino_df(anio_n)
-
-    df_conteo = (
-        df
-        .groupby("carrera_destino")["mrun"]
-        .nunique()
-        .reset_index(name="estudiantes_recibidos")
-        .sort_values("estudiantes_recibidos", ascending=False)
-        .head(top_n)
-        .reset_index(drop=True)
-    )
-
-    df_conteo.index += 1
-    df_conteo.index.name = "Ranking"
-
-    return df_conteo
-
-#KPI para calcular las areas a las que se fueron los estudiantes que abandonaron.
-def get_top_fuga_a_area(top_n: int = 10, anio_n: Optional[int] = None):
-
-    df = get_primer_destino_df(anio_n)
-
-    df_conteo = (
-        df
-        .groupby("area_conocimiento_destino")["mrun"]
+        .groupby(columna)["mrun"]
         .nunique()
         .reset_index(name="estudiantes_recibidos")
         .sort_values("estudiantes_recibidos", ascending=False)

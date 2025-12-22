@@ -419,13 +419,36 @@ def get_continuidad_per_year(db_conn, anio_n=None):
 def agrupar_trayectoria_por_carrera(df_destino, df_fugas):
 
     # 1. Base de metadata de fuga
-    df_base = df_fugas[['mrun', 'cohorte', 'anio_fuga', 'jornada']].drop_duplicates()
+    df_base = df_fugas[
+        ['mrun', 'gen_alu', 'rango_edad','anio_ultima_matricula_ecas','cohorte', 'anio_fuga', 'jornada']
+    ].drop_duplicates()
+
     df_base.rename(
         columns={
             'cohorte': 'año_cohorte_ecas',
             'anio_fuga': 'año_primer_fuga'
         },
         inplace=True
+    )
+
+    df_base["rango_edad"] = (
+        df_base["rango_edad"]
+        .astype(str)
+        .str.lower()
+        .str.strip()
+        .str.capitalize() # Deja: '20 a 24 años'
+    )
+
+    # Traducción de género
+    mapa_genero = {
+        1: "Hombre",
+        2: "Mujer"
+    }
+
+    df_base["gen_alu"] = (
+        df_base["gen_alu"]
+        .map(mapa_genero)
+        .fillna("Sin información")
     )
 
     # 2. Reconstruir ingreso y último año por carrera / institución
@@ -501,6 +524,8 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tu
     sql_base_ecas = f"""
     SELECT 
     mrun,
+    gen_alu,
+    rango_edad,
     cat_periodo,
     anio_ing_carr_ori AS cohorte,
     cod_inst,
@@ -612,13 +637,23 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tu
         return pd.DataFrame(), pd.DataFrame() 
     
     # 5. Obtener jornada y merge (Necesario para la función agrupar_trayectoria_por_carrera)
-    df_jornada_origen = df_ecas_cohortes.groupby('mrun').agg(
-        jornada=('jornada', 'first')
-    ).reset_index()
+    df_jornada_origen = (
+        df_ecas_cohortes
+        .sort_values(["mrun", "cat_periodo"])
+        .groupby("mrun", as_index=False)
+        .last()[["mrun", "jornada", "gen_alu", "rango_edad", "cat_periodo"]]
+    )
+
+    df_jornada_origen.rename(
+        columns={
+            "cat_periodo": "anio_ultima_matricula_ecas"
+        },
+        inplace=True
+    )
 
     df_fugas_final_meta = pd.merge(
         df_fugas_final_meta, 
-        df_jornada_origen[['mrun', 'jornada']], 
+        df_jornada_origen[['mrun', 'jornada', 'gen_alu', 'rango_edad', 'anio_ultima_matricula_ecas']], 
         on='mrun', 
         how='left'
     )
@@ -675,13 +710,27 @@ def get_fuga_multianual_trayectoria(db_conn, anio_n: Optional[int] = None) -> Tu
     mruns_abandono_total = [mrun for mrun in mruns_desertores_base if mrun not in mruns_con_destino]
     
     df_abandono_total = df_fugas_final_meta[df_fugas_final_meta['mrun'].isin(mruns_abandono_total)].copy()
-    df_abandono_total = df_abandono_total[['mrun', 'cohorte', 'anio_fuga']]
+    df_abandono_total = df_abandono_total[['mrun', 'cohorte', 'anio_fuga', 'gen_alu', 'rango_edad', 'jornada']].drop_duplicates()
+    
+    mapa_genero = {
+        1: "Hombre",
+        2: "Mujer"
+    }
+
+    df_abandono_total["gen_alu"] = (
+        df_abandono_total["gen_alu"]
+        .map(mapa_genero)
+        .fillna("Sin información")
+    )
+
     df_abandono_total.rename(columns={'cohorte': 'año_cohorte_ecas', 'anio_fuga': 'año_primer_fuga'}, inplace=True)
     
-    # 9. Generar el DataFrame de Fuga a Destino Agrupado
-    # Importante: Aquí se pasa df_fugas_final_meta, que solo contiene desertores
+    print(df_destino)
+    print(df_fugas_final_meta)
+
     df_destino_agrupado = agrupar_trayectoria_por_carrera(df_destino, df_fugas_final_meta) 
     
+  
     # 10. Limpieza de la tabla temporal
     try:
         db_conn.execute("DROP TABLE #TempMrunsFuga;")
@@ -782,5 +831,5 @@ def exportar_fuga_a_excel(df_destino_agrupado, df_abandono_total, anio_n):
     if df_destino_agrupado.empty and df_abandono_total.empty:
         print("No se generaron archivos de salida.")
 
-#df_destino, df_abandono = get_fuga_multianual_trayectoria(db_conn, anio_n=None)
-#exportar_excel = exportar_fuga_a_excel(df_destino, df_abandono, anio_n=None)
+df_destino, df_abandono = get_fuga_multianual_trayectoria(db_conn, anio_n=None)
+exportar_excel = exportar_fuga_a_excel(df_destino, df_abandono, anio_n=None)
