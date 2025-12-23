@@ -5,6 +5,8 @@ from auxiliar import *
 
 FILE_PATH = 'trayectoria_post_ecas.xlsx'
 
+df_trayectorias_titulados = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+
 orden_nivel = {
     'Pregrado': 1,
     'Postítulo': 2,
@@ -16,30 +18,19 @@ orden_nivel = {
 #Solo evalua el maximo nivel alcanzado tras titulación en ECAS. 
 def calcular_nivel_reingreso(cohorte_n: int | None = None, jornada: str | None = None):
 
-    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+    df_reingreso = df_trayectorias_titulados.copy()
 
-    columnas = [
-        "mrun",
-        "año_cohorte_ecas",
-        "año_titulacion_ecas",
-        "anio_ingreso_destino",
-        "nivel_global",
-        "jornada"
-    ]
-
-    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
+    df_reingreso = df_reingreso.dropna(subset=["mrun", "año_titulacion_ecas"])
 
     if cohorte_n is not None:
-        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
-        df = df[df["año_cohorte_ecas"] == cohorte_n]
-
+        df_reingreso["año_cohorte_ecas"] = pd.to_numeric(df_reingreso["año_cohorte_ecas"], errors="coerce")
+        df_reingreso = df_reingreso[df_reingreso["año_cohorte_ecas"] == cohorte_n]
     if jornada is not None:
-        df = df[df["jornada"] == jornada]
+        df_reingreso = df_reingreso[df_reingreso["jornada"] == jornada]
 
     resultados = []
 
-    for _, row in df.iterrows():
-
+    for _, row in df_reingreso.iterrows():
         anio_tit = row["año_titulacion_ecas"]
 
         ingresos = split_pipe_list(row["anio_ingreso_destino"])
@@ -69,8 +60,10 @@ def calcular_nivel_reingreso(cohorte_n: int | None = None, jornada: str | None =
             "nivel_global": nivel_max
         })
 
-    df_max = pd.DataFrame(resultados)
+    if not resultados:
+        return pd.DataFrame(columns=["nivel_global", "cantidad", "total_reingresan", "porcentaje"])
 
+    df_max = pd.DataFrame(resultados)
     total = df_max["mrun"].nunique()
 
     conteo = (
@@ -89,29 +82,19 @@ def calcular_nivel_reingreso(cohorte_n: int | None = None, jornada: str | None =
 #Evalua el nivel al que ingresan los estudiantes inmediatamente después de titularse en ECAS.
 def calcular_nivel_reingreso_inmediato(cohorte_n: int | None = None, jornada: str | None = None):
 
-    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+    df_reingreso = df_trayectorias_titulados.copy()
 
-    columnas = [
-        "mrun",
-        "año_cohorte_ecas",
-        "año_titulacion_ecas",
-        "anio_ingreso_destino",
-        "nivel_global",
-        "jornada"
-    ]
-
-    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
+    df_reingreso = df_reingreso.dropna(subset=["mrun", "año_titulacion_ecas"])
 
     if cohorte_n is not None:
-        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
-        df = df[df["año_cohorte_ecas"] == cohorte_n]
+        df_reingreso["año_cohorte_ecas"] = pd.to_numeric(df_reingreso["año_cohorte_ecas"], errors="coerce")
+        df_reingreso = df_reingreso[df_reingreso["año_cohorte_ecas"] == cohorte_n]
 
     if jornada is not None:
-        df = df[df["jornada"] == jornada]
-
+        df_reingreso = df_reingreso[df_reingreso["jornada"] == jornada]
     resultados = []
 
-    for _, row in df.iterrows():
+    for _, row in df_reingreso.iterrows():
         anio_tit = row["año_titulacion_ecas"]
         ingresos = split_pipe_list(row["anio_ingreso_destino"])
         niveles = split_pipe_list(row["nivel_global"])
@@ -168,31 +151,19 @@ def calcular_top_reingreso_por_columna_titulados(
     - top_n: limitar al top N (opcional)
     """
 
-    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+    df_reingreso = df_trayectorias_titulados.copy()
 
-    columnas = [
-        "mrun",
-        "año_cohorte_ecas",
-        "año_titulacion_ecas",
-        "anio_ingreso_destino",
-        "nivel_global",
-        "jornada",
-        columna_objetivo
-    ]
-
-    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
+    df_reingreso = df_reingreso.dropna(subset=["mrun", "año_titulacion_ecas"])
 
     if cohorte_n is not None:
-        df["año_cohorte_ecas"] = pd.to_numeric(df["año_cohorte_ecas"], errors="coerce")
-        df = df[df["año_cohorte_ecas"] == cohorte_n]
-
+        df_reingreso["año_cohorte_ecas"] = pd.to_numeric(df_reingreso["año_cohorte_ecas"], errors="coerce")
+        df_reingreso = df_reingreso[df_reingreso["año_cohorte_ecas"] == cohorte_n]
     if jornada is not None:
-        df = df[df["jornada"] == jornada]
+        df_reingreso = df_reingreso[df_reingreso["jornada"] == jornada]
 
     resultados = []
 
-    for _, row in df.iterrows():
-
+    for _, row in df_reingreso.iterrows():
         anio_tit = row["año_titulacion_ecas"]
 
         ingresos = split_pipe_list(row["anio_ingreso_destino"])
@@ -252,7 +223,8 @@ def calcular_top_reingreso_por_columna_titulados(
 #separado por nivel_global (pregrado, postitulo, postgrado).
 #Evalua el promedio. 
 def calcular_demora_reingreso_por_nivel(
-    cohorte_n: int | None = None
+    cohorte_n: int | None = None,
+    jornada: str | None = None
 ):
     """
     KPI 4:
@@ -262,27 +234,22 @@ def calcular_demora_reingreso_por_nivel(
     Cada trayectoria post-ECAS se contabiliza como una observación.
     """
 
-    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+    df_reingreso = df_trayectorias_titulados.copy()
 
-    columnas = [
-        "mrun",
-        "año_cohorte_ecas",
-        "año_titulacion_ecas",
-        "anio_ingreso_destino",
-        "nivel_global"
-    ]
-
-    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
+    df_reingreso = df_reingreso.dropna(subset=["mrun", "año_titulacion_ecas"])
 
     if cohorte_n is not None:
-        df["año_cohorte_ecas"] = pd.to_numeric(
-            df["año_cohorte_ecas"], errors="coerce"
+        df_reingreso["año_cohorte_ecas"] = pd.to_numeric(
+            df_reingreso["año_cohorte_ecas"], errors="coerce"
         )
-        df = df[df["año_cohorte_ecas"] == cohorte_n]
+        df_reingreso = df_reingreso[df_reingreso["año_cohorte_ecas"] == cohorte_n]
+
+    if jornada is not None:
+        df_reingreso = df_reingreso[df_reingreso["jornada"] == jornada]
 
     registros = []
 
-    for _, row in df.iterrows():
+    for _, row in df_reingreso.iterrows():
 
         anio_tit = row["año_titulacion_ecas"]
         cohorte = row["año_cohorte_ecas"]
@@ -333,7 +300,8 @@ def calcular_demora_reingreso_por_nivel(
 #KPI 4.1: Tiempo de demora en acceder a otra carrera tras titularse en ECAS,
 #separado por cantidad
 def calcular_distribucion_demora_reingreso(
-    cohorte_n: int | None = None
+    cohorte_n: int | None = None,
+    jornada: str | None = None
 ):
     """
     KPI 4.b:
@@ -343,27 +311,22 @@ def calcular_distribucion_demora_reingreso(
     Cada trayectoria post-ECAS se contabiliza como una observación.
     """
 
-    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+    df_reingreso = df_trayectorias_titulados.copy()
 
-    columnas = [
-        "mrun",
-        "año_cohorte_ecas",
-        "año_titulacion_ecas",
-        "anio_ingreso_destino",
-        "nivel_global"
-    ]
-
-    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
+    df_reingreso = df_reingreso.dropna(subset=["mrun", "año_titulacion_ecas"])
 
     if cohorte_n is not None:
-        df["año_cohorte_ecas"] = pd.to_numeric(
-            df["año_cohorte_ecas"], errors="coerce"
+        df_reingreso["año_cohorte_ecas"] = pd.to_numeric(
+            df_reingreso["año_cohorte_ecas"], errors="coerce"
         )
-        df = df[df["año_cohorte_ecas"] == cohorte_n]
+        df_reingreso = df_reingreso[df_reingreso["año_cohorte_ecas"] == cohorte_n]
+
+    if jornada is not None:
+        df_reingreso = df_reingreso[df_reingreso["jornada"] == jornada]
 
     registros = []
 
-    for _, row in df.iterrows():
+    for _, row in df_reingreso.iterrows():
 
         anio_tit = row["año_titulacion_ecas"]
         cohorte = row["año_cohorte_ecas"]
@@ -384,6 +347,7 @@ def calcular_distribucion_demora_reingreso(
             demora = anio - anio_tit
 
             registros.append({
+                "mrun": row["mrun"],
                 "cohorte": cohorte,
                 "nivel_global": nivel,
                 "demora_anios": demora
@@ -394,13 +358,17 @@ def calcular_distribucion_demora_reingreso(
     if df_eventos.empty:
         return df_eventos
 
+    df_eventos = df_eventos.sort_values("demora_anios").drop_duplicates(
+        subset=["mrun", "nivel_global"], 
+        keep="first"
+    )
+
     distribucion = (
         df_eventos
         .groupby(["cohorte", "nivel_global", "demora_anios"])
         .size()
-        .rename("cantidad_trayectorias")
+        .rename("cantidad_alumnos") # Cambiamos el nombre para ser precisos
         .reset_index()
-        .sort_values(["cohorte", "nivel_global", "demora_anios"])
     )
 
     return distribucion
@@ -408,31 +376,26 @@ def calcular_distribucion_demora_reingreso(
 # KPI5: En promedio, ¿Cómo se ve la ruta de los titulados de ECAS?
 # Evaluamos los porcentajes de cuantos hacen un pregrado (titulacion) > postítulo > magister > doctorado. 
 def calcular_ruta_promedio_titulados(
-    cohorte_n: Optional[int] = None
+    cohorte_n: Optional[int] = None,
+    jornada: Optional[str] = None
 ) -> pd.DataFrame:
 
-    df = pd.read_excel(FILE_PATH, sheet_name="Trayectoria_Resumen")
+    df_reingreso = df_trayectorias_titulados.copy()
 
-    columnas = [
-        "mrun",
-        "año_cohorte_ecas",
-        "año_titulacion_ecas",
-        "anio_ingreso_destino",
-        "nivel_global"
-    ]
-
-    df = df[columnas].dropna(subset=["mrun", "año_titulacion_ecas"])
+    df_reingreso = df_reingreso.dropna(subset=["mrun", "año_titulacion_ecas"])
 
     if cohorte_n is not None:
-        df["año_cohorte_ecas"] = pd.to_numeric(
-            df["año_cohorte_ecas"], errors="coerce"
+        df_reingreso["año_cohorte_ecas"] = pd.to_numeric(
+            df_reingreso["año_cohorte_ecas"], errors="coerce"
         )
-        df = df[df["año_cohorte_ecas"] == cohorte_n]
+        df_reingreso = df_reingreso[df_reingreso["año_cohorte_ecas"] == cohorte_n]
+
+    if jornada is not None:
+        df_reingreso = df_reingreso[df_reingreso["jornada"] == jornada]
 
     rutas = []
 
-    for _, row in df.iterrows():
-
+    for _, row in df_reingreso.iterrows():
         anio_tit = row["año_titulacion_ecas"]
 
         ingresos = split_pipe_list(row["anio_ingreso_destino"])
